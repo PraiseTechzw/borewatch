@@ -111,3 +111,5 @@ temp/
 
 # Generated version metadata (not part of source)
 client/public/__manus__/version.json
+.neon
+node_modules/

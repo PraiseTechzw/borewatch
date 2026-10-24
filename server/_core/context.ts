@@ -9,7 +9,6 @@ export type TrpcContext = {
 };
 
 export async function createContext(opts: CreateExpressContextOptions): Promise<TrpcContext> {
-  let user: User | null = null;
-  try { user = await authenticateRequest(opts.req); } catch { user = null; }
+  const user = await authenticateRequest(opts.req);
   return { req: opts.req, res: opts.res, user };
 }

@@ -1,45 +1,49 @@
-import { trpc } from "@/lib/trpc";
-import { TRPCClientError } from "@trpc/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
+import { authClient } from "@/lib/auth";
+import { trpc } from "@/lib/trpc";
 
 export type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
   redirectPath?: string;
 };
 
+export const NEON_SESSION_QUERY_KEY = ["neon-auth-session"];
+
 export function useAuth(options?: UseAuthOptions) {
   const { redirectOnUnauthenticated = false, redirectPath = "/login" } = options ?? {};
+  const queryClient = useQueryClient();
   const utils = trpc.useUtils();
+  const sessionQuery = useQuery({
+    queryKey: NEON_SESSION_QUERY_KEY,
+    queryFn: async () => {
+      const { data, error } = await authClient.getSession();
+      if (error) throw new Error(error.message);
+      return Boolean(data?.session && data.user);
+    },
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const meQuery = trpc.auth.me.useQuery(undefined, {
+    enabled: sessionQuery.data === true,
     retry: false,
     refetchOnWindowFocus: false,
   });
 
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => {
-      utils.auth.me.setData(undefined, null);
-    },
-  });
-
   const logout = useCallback(async () => {
-    try {
-      await logoutMutation.mutateAsync();
-    } catch (error) {
-      if (!(error instanceof TRPCClientError) || error.data?.code !== "UNAUTHORIZED") {
-        throw error;
-      }
-    } finally {
-      utils.auth.me.setData(undefined, null);
-      await utils.auth.me.invalidate();
-    }
-  }, [logoutMutation, utils]);
+    const { error } = await authClient.signOut();
+    if (error) throw new Error(error.message);
+    queryClient.setQueryData(NEON_SESSION_QUERY_KEY, false);
+    utils.auth.me.setData(undefined, null);
+    await utils.auth.me.invalidate();
+  }, [queryClient, utils]);
 
   useEffect(() => {
     if (
       redirectOnUnauthenticated &&
-      !meQuery.isLoading &&
-      !logoutMutation.isPending &&
-      !meQuery.data &&
+      !sessionQuery.isLoading &&
+      !sessionQuery.error &&
+      sessionQuery.data !== true &&
       window.location.pathname !== redirectPath
     ) {
       const currentPath = window.location.pathname;
@@ -51,13 +55,7 @@ export function useAuth(options?: UseAuthOptions) {
           : redirectPath;
       window.location.assign(destination);
     }
-  }, [
-    redirectOnUnauthenticated,
-    redirectPath,
-    meQuery.isLoading,
-    meQuery.data,
-    logoutMutation.isPending,
-  ]);
+  }, [redirectOnUnauthenticated, redirectPath, sessionQuery.data, sessionQuery.error, sessionQuery.isLoading]);
 
   const user = meQuery.data ?? null;
 
@@ -65,10 +63,13 @@ export function useAuth(options?: UseAuthOptions) {
     user,
     role: user?.role ?? null,
     isAdmin: user?.role === "admin",
-    loading: meQuery.isLoading || logoutMutation.isPending,
-    error: meQuery.error ?? logoutMutation.error ?? null,
+    loading: sessionQuery.isLoading || (sessionQuery.data === true && meQuery.isLoading),
+    error: sessionQuery.error ?? meQuery.error ?? null,
     isAuthenticated: Boolean(user),
-    refresh: () => meQuery.refetch(),
+    refresh: async () => {
+      await queryClient.invalidateQueries({ queryKey: NEON_SESSION_QUERY_KEY });
+      return meQuery.refetch();
+    },
     logout,
   };
 }

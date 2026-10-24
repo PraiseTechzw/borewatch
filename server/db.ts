@@ -1,65 +1,56 @@
-import { and, eq, gt } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import { authSessions, InsertUser, users } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+let pool: Pool | undefined;
+let database: ReturnType<typeof drizzle> | undefined;
+
 export async function getDb() {
-  if (!_db && ENV.databaseUrl) {
-    try { _db = drizzle(ENV.databaseUrl); } catch (error) { console.warn("[Database] Failed to connect:", error); _db = null; }
+  if (!ENV.databaseUrl) return null;
+  if (!pool) {
+    pool = new Pool({
+      connectionString: ENV.databaseUrl,
+      max: 10,
+      connectionTimeoutMillis: 10_000,
+    });
+    pool.on("error", (error) => console.error("[Database] Unexpected idle client error:", error));
   }
-  return _db;
+  database ??= drizzle(pool);
+  return database;
 }
 
-export async function getUserByEmail(email: string) {
+export async function syncNeonUser(input: {
+  neonUserId: string;
+  email: string;
+  name: string | null;
+  verifiedOwner: boolean;
+}) {
   const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
-  return result[0];
-}
+  if (!db) throw new Error("Database is not available; configure DATABASE_URL");
 
-export async function getUserById(id: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
-  return result[0];
-}
+  const values = {
+    neonUserId: input.neonUserId,
+    email: input.email.trim().toLowerCase(),
+    name: input.name?.trim() || null,
+    ...(input.verifiedOwner ? { role: "admin" as const } : {}),
+    lastSignedIn: new Date(),
+    updatedAt: new Date(),
+  };
 
-export async function createUser(input: { email: string; name: string; passwordHash: string }) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  const email = input.email.trim().toLowerCase();
-  const role = ENV.ownerEmail && ENV.ownerEmail === email ? "admin" : "user";
-  const values: InsertUser = { email, name: input.name.trim() || null, passwordHash: input.passwordHash, emailVerified: false, role, lastSignedIn: new Date() };
-  const result = await db.insert(users).values(values);
-  const userId = Number(result[0].insertId);
-  const user = await getUserById(userId);
-  if (!user) throw new Error("Account could not be created");
+  await db.insert(users).values(values).onConflictDoUpdate({
+    target: users.neonUserId,
+    set: {
+      email: values.email,
+      name: values.name,
+      ...(input.verifiedOwner ? { role: "admin" as const } : {}),
+      lastSignedIn: values.lastSignedIn,
+      updatedAt: values.updatedAt,
+    },
+  });
+
+  const [user] = await db.select().from(users).where(eq(users.neonUserId, input.neonUserId)).limit(1);
+  if (!user) throw new Error("Unable to synchronize Neon Auth user");
   return user;
-}
-
-export async function touchUser(id: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, id));
-}
-
-export async function createSession(tokenHash: string, userId: number, expiresAt: Date) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  await db.insert(authSessions).values({ tokenHash, userId, expiresAt });
-}
-
-export async function getUserBySessionHash(tokenHash: string) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select({ user: users, session: authSessions }).from(authSessions).innerJoin(users, eq(authSessions.userId, users.id)).where(and(eq(authSessions.tokenHash, tokenHash), gt(authSessions.expiresAt, new Date()))).limit(1);
-  if (result[0]) await db.update(authSessions).set({ lastSeenAt: new Date() }).where(eq(authSessions.id, result[0].session.id));
-  return result[0]?.user;
-}
-
-export async function deleteSession(tokenHash: string) {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(authSessions).where(eq(authSessions.tokenHash, tokenHash));
 }

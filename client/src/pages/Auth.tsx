@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   Check,
@@ -13,6 +14,8 @@ import {
   UserCheck,
   X,
 } from "lucide-react";
+import { authClient } from "@/lib/auth";
+import { NEON_SESSION_QUERY_KEY } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -27,6 +30,7 @@ export interface AuthProps {
 export default function Auth({ initialMode }: AuthProps = {}) {
   const [, navigate] = useLocation();
   const auth = useAuth();
+  const queryClient = useQueryClient();
   const utils = trpc.useUtils();
 
   // Determine initial mode from prop, URL pathname or query param
@@ -48,6 +52,7 @@ export default function Auth({ initialMode }: AuthProps = {}) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
 
   const emailId = useId();
   const nameId = useId();
@@ -62,26 +67,6 @@ export default function Auth({ initialMode }: AuthProps = {}) {
       navigate(returnTo);
     }
   }, [auth.isAuthenticated, navigate]);
-
-  const loginMutation = trpc.auth.login.useMutation({
-    onSuccess: async () => {
-      await utils.auth.me.invalidate();
-      const params = new URLSearchParams(window.location.search);
-      const returnTo = params.get("returnTo") || "/";
-      navigate(returnTo);
-    },
-  });
-
-  const registerMutation = trpc.auth.register.useMutation({
-    onSuccess: async () => {
-      await utils.auth.me.invalidate();
-      const params = new URLSearchParams(window.location.search);
-      const returnTo = params.get("returnTo") || "/";
-      navigate(returnTo);
-    },
-  });
-
-  const pending = loginMutation.isPending || registerMutation.isPending;
 
   const isPasswordLongEnough = password.length >= 12;
   const doPasswordsMatch =
@@ -122,29 +107,44 @@ export default function Auth({ initialMode }: AuthProps = {}) {
         return;
       }
 
+      setPending(true);
       try {
-        await registerMutation.mutateAsync({
+        const result = await authClient.signUp.email({
           email: trimmedEmail,
           password,
           name: trimmedName,
         });
+        if (result.error) throw new Error(result.error.message);
       } catch (cause) {
         const message =
           cause instanceof Error ? cause.message : "Registration failed";
         setError(message);
+        return;
+      } finally {
+        setPending(false);
       }
     } else {
+      setPending(true);
       try {
-        await loginMutation.mutateAsync({
+        const result = await authClient.signIn.email({
           email: trimmedEmail,
           password,
         });
+        if (result.error) throw new Error(result.error.message);
       } catch (cause) {
         const message =
           cause instanceof Error ? cause.message : "Authentication failed";
         setError(message);
+        return;
+      } finally {
+        setPending(false);
       }
     }
+
+    await queryClient.invalidateQueries({ queryKey: NEON_SESSION_QUERY_KEY });
+    await utils.auth.me.invalidate();
+    const params = new URLSearchParams(window.location.search);
+    navigate(params.get("returnTo") || "/");
   };
 
   return (
