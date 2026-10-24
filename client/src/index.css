@@ -50,6 +50,19 @@
 @media(max-width:980px){ .workflow-stage-list { grid-template-columns:repeat(4, minmax(90px, 1fr)); } }
 @media(max-width:700px){ .workflow-stage-list, .hosting-columns { grid-template-columns:1fr 1fr; } }
 /* Authentication and Account Management */
+.auth-state {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  color: #47574f;
+}
+.auth-state > svg { color: #176b63; }
+.auth-state p { max-width: 560px; margin: 0; color: #6f7d75; }
 .auth-page {
   min-height: 100vh;
   display: grid;
