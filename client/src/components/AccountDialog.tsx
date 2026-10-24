@@ -13,7 +13,7 @@ import {
   User,
   X,
 } from "lucide-react";
-import { trpc } from "@/lib/trpc";
+import { authClient } from "@/lib/auth";
 import type { useAuth } from "@/_core/hooks/useAuth";
 
 const PERMISSION_LABELS: Record<string, string> = {
@@ -62,21 +62,7 @@ export default function AccountDialog({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState(false);
-
-  const changePassword = trpc.auth.changePassword.useMutation({
-    onSuccess: () => {
-      setPasswordSuccess(true);
-      setPasswordError("");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      notify("Password changed successfully.");
-    },
-    onError: (err) => {
-      setPasswordError(err.message || "Failed to update password");
-      setPasswordSuccess(false);
-    },
-  });
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const isNewPasswordLongEnough = newPassword.length >= 12;
   const doNewPasswordsMatch =
@@ -109,10 +95,22 @@ export default function AccountDialog({
       return;
     }
 
-    await changePassword.mutateAsync({
-      currentPassword,
-      newPassword,
-    });
+    setChangingPassword(true);
+    try {
+      const result = await authClient.changePassword({ currentPassword, newPassword });
+      if (result.error) throw new Error(result.error.message);
+      setPasswordSuccess(true);
+      setPasswordError("");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      notify("Password changed successfully.");
+    } catch (cause) {
+      setPasswordError(cause instanceof Error ? cause.message : "Failed to update password");
+      setPasswordSuccess(false);
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   const user = auth.user;
@@ -206,7 +204,7 @@ export default function AccountDialog({
               <div>
                 <b>Session Status: Active</b>
                 <p>
-                  Authenticated via secure, HTTP-only cookie session. Permissions are validated on each server request.
+                  Authentication is managed by Neon. Workspace permissions are checked by the BoreWatch server.
                 </p>
               </div>
             </div>
@@ -275,7 +273,7 @@ export default function AccountDialog({
           <div className="account-tab-content">
             <div className="security-intro">
               <p>
-                Update your account password. All passwords must be at least 12 characters and are securely encrypted using bcrypt.
+                Update your Neon-managed account password. Use at least 12 characters.
               </p>
             </div>
 
@@ -309,7 +307,7 @@ export default function AccountDialog({
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="Enter current password"
                     required
-                    disabled={changePassword.isPending}
+                    disabled={changingPassword}
                   />
                   <button
                     type="button"
@@ -337,7 +335,7 @@ export default function AccountDialog({
                     placeholder="Enter new 12+ character password"
                     required
                     minLength={12}
-                    disabled={changePassword.isPending}
+                    disabled={changingPassword}
                   />
                   <button
                     type="button"
@@ -379,7 +377,7 @@ export default function AccountDialog({
                     placeholder="Re-enter new password"
                     required
                     minLength={12}
-                    disabled={changePassword.isPending}
+                    disabled={changingPassword}
                   />
                   <button
                     type="button"
@@ -413,7 +411,7 @@ export default function AccountDialog({
                   type="button"
                   className="button button-quiet"
                   onClick={close}
-                  disabled={changePassword.isPending}
+                  disabled={changingPassword}
                 >
                   Cancel
                 </button>
@@ -421,13 +419,13 @@ export default function AccountDialog({
                   type="submit"
                   className="button button-primary"
                   disabled={
-                    changePassword.isPending ||
+                    changingPassword ||
                     !isNewPasswordLongEnough ||
                     !doNewPasswordsMatch ||
                     !currentPassword
                   }
                 >
-                  {changePassword.isPending ? (
+                  {changingPassword ? (
                     <>
                       <Loader2 size={15} className="animate-spin" />
                       <span>Updating password…</span>

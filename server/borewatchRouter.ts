@@ -5,6 +5,8 @@ import {
   auditEvents,
   boreholeRecords,
   dataSources,
+  evidenceFiles,
+  type User,
   userWorkspaceRoles,
   users,
   workflowEvents,
@@ -14,6 +16,8 @@ import {
 import { getDb } from "./db";
 import { permissionProcedure, adminProcedure, protectedProcedure, router } from "./_core/trpc";
 import { getUserPermissions } from "./permissions";
+import { deleteEvidence, getEvidenceUrl, uploadEvidence } from "./storage";
+import { TRPCError } from "@trpc/server";
 
 const coordinate = (min: number, max: number) => z.string().refine((value) => {
   const number = Number(value);
@@ -33,6 +37,22 @@ async function getSettings() {
   const [settings] = await db.select().from(workspaceSettings).where(eq(workspaceSettings.id, 1)).limit(1);
   if (!settings) throw new Error("Workspace configuration has not been initialized");
   return settings;
+}
+
+async function assertEvidenceAccess(user: User, entityType: "borehole" | "application", entityId: number, write: boolean) {
+  const db = await dbOrThrow();
+  const permissions = await getUserPermissions(user);
+  if (entityType === "borehole") {
+    const allowed = permissions.has("*") || permissions.has(write ? "record:update" : "record:view");
+    if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have permission to access borehole evidence" });
+    const [record] = await db.select({ id: boreholeRecords.id }).from(boreholeRecords).where(eq(boreholeRecords.id, entityId)).limit(1);
+    if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Borehole record not found" });
+    return;
+  }
+  const [application] = await db.select().from(applications).where(eq(applications.id, entityId)).limit(1);
+  if (!application) throw new TRPCError({ code: "NOT_FOUND", message: "Application not found" });
+  const allowed = permissions.has("*") || permissions.has("application:review") || application.applicantId === user.id;
+  if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have permission to access application evidence" });
 }
 
 export const borewatchRouter = router({
@@ -137,6 +157,66 @@ export const borewatchRouter = router({
         await audit(ctx.user!.id, "application.transitioned", "application", application.reference, input);
         return db.select().from(applications).where(eq(applications.id, application.id)).limit(1).then(([updated]) => updated);
       }),
+  }),
+  evidence: router({
+    list: protectedProcedure.input(z.object({
+      entityType: z.enum(["borehole", "application"]),
+      entityId: z.number().int().positive(),
+    })).query(async ({ ctx, input }) => {
+      await assertEvidenceAccess(ctx.user!, input.entityType, input.entityId, false);
+      const db = await dbOrThrow();
+      const files = await db.select().from(evidenceFiles)
+        .where(and(eq(evidenceFiles.entityType, input.entityType), eq(evidenceFiles.entityId, input.entityId)))
+        .orderBy(desc(evidenceFiles.createdAt));
+      return Promise.all(files.map(async (file) => ({ ...file, downloadUrl: await getEvidenceUrl(file.storageKey) })));
+    }),
+    upload: protectedProcedure.input(z.object({
+      entityType: z.enum(["borehole", "application"]),
+      entityId: z.number().int().positive(),
+      fileName: z.string().trim().min(1).max(255),
+      contentType: z.enum(["application/pdf", "image/jpeg", "image/png"]),
+      contentBase64: z.string().min(4).max(14_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/, "File data must be valid base64"),
+    })).mutation(async ({ ctx, input }) => {
+      await assertEvidenceAccess(ctx.user!, input.entityType, input.entityId, true);
+      const bytes = Buffer.from(input.contentBase64, "base64");
+      if (!bytes.length || bytes.length > 10 * 1024 * 1024) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Evidence files must be between 1 byte and 10 MB" });
+      }
+      const db = await dbOrThrow();
+      const fileName = input.fileName.split(/[\\/]/).at(-1)?.replace(/[\u0000-\u001f]/g, "").slice(0, 255);
+      if (!fileName) throw new TRPCError({ code: "BAD_REQUEST", message: "File name is invalid" });
+      const storageKey = `evidence/${input.entityType}/${input.entityId}/${crypto.randomUUID()}`;
+      await uploadEvidence(storageKey, bytes, input.contentType);
+      try {
+        const file = await db.transaction(async (tx) => {
+          const [created] = await tx.insert(evidenceFiles).values({
+            entityType: input.entityType,
+            entityId: input.entityId,
+            storageKey,
+            fileName,
+            contentType: input.contentType,
+            byteSize: bytes.length,
+            uploadedBy: ctx.user!.id,
+          }).returning();
+          await tx.insert(auditEvents).values({
+            actorId: ctx.user!.id,
+            action: "evidence.uploaded",
+            resourceType: input.entityType,
+            resourceId: String(input.entityId),
+            detailJson: JSON.stringify({ fileName, contentType: input.contentType, byteSize: bytes.length }),
+          });
+          return created;
+        });
+        return file;
+      } catch (error) {
+        try {
+          await deleteEvidence(storageKey);
+        } catch (cleanupError) {
+          console.error("[Evidence] Failed to remove an object after metadata write failed:", cleanupError);
+        }
+        throw error;
+      }
+    }),
   }),
   administration: router({
     assignRole: adminProcedure.input(z.object({ userId: z.number().int().positive(), roleKey: z.string().trim().min(1).max(64) })).mutation(async ({ ctx, input }) => {
