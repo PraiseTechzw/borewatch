@@ -10,9 +10,8 @@ The system does not manufacture regulatory decisions. Roles, workflow stages, sc
 
 ## Implemented server-backed functionality
 
-- Local email/password registration and login with bcrypt password hashing.
-- Database-backed sessions with hashed session tokens, expiry, HTTP-only cookies and logout.
-- MySQL/Drizzle persistence for:
+- Neon Managed Auth for email/password registration, login, session management and password changes.
+- PostgreSQL/Drizzle persistence for:
   - Borehole records
   - Applications
   - Workflow transition history
@@ -22,6 +21,7 @@ The system does not manufacture regulatory decisions. Roles, workflow stages, sc
   - Data-source metadata
   - Append-only audit events
 - Server-side permission middleware and administrator controls.
+- Neon Object Storage for private evidence uploads, with per-record access checks, short-lived download links and database-backed metadata/audit events.
 - Server-side coordinate validation and record creation/update authorization.
 - Server-side application creation and workflow transition validation against the configured workflow JSON.
 - Configurable ZINWA/local Sub-Catchment Council settings and data-layer access metadata.
@@ -37,17 +37,17 @@ The migration seeds editable configuration records for:
 - Applicant, inspector, reviewing officer, delegated decision officer, data steward, system administrator and auditor roles.
 - A configurable application workflow beginning at draft and ending at closed.
 
-These are starting configuration records, not legal rules. Update them through the protected administration API after confirming the responsible organization and data-use permissions.
+These are editable starting configuration records, not legal rules or approved source datasets. The workflow is marked pending authority validation; data-source entries explicitly remain unloaded until approved files and use terms are supplied.
 
 ## Run and deploy
 
-Requirements: Node.js compatible with the pinned toolchain, pnpm 10.18.0, and a MySQL-compatible database.
+Requirements: Node.js compatible with the pinned toolchain, pnpm 10.18.0, and the linked Neon project.
 
 ```bash
 pnpm install --frozen-lockfile
 ```
 
-Copy `.env.example` to `.env` and set `DATABASE_URL` to your MySQL-compatible database connection string. Set `OWNER_EMAIL` if an account should receive the initial platform administrator role. `PORT` defaults to `3000`; `FORGE_API_URL` and `FORGE_API_KEY` are only needed if the Forge file-storage integration is enabled. Do not commit `.env` or credentials.
+Copy `.env.example` to `.env.local`, then run `neon env pull` to populate the linked branch's Postgres, Managed Auth, and private Object Storage variables. Set `OWNER_EMAIL` to the intended administrator email; that account receives the administrator role only when Neon Auth marks the email verified. Never commit `.env.local` or credentials.
 
 Then apply the migrations and start the server:
 
@@ -71,7 +71,8 @@ pnpm build
 - `server/permissions.ts` — database-backed permission resolution.
 - `server/_core/trpc.ts` — authentication, administrator and permission middleware.
 - `drizzle/schema.ts` — persistent domain schema.
-- `drizzle/0001_famous_major_mapleleaf.sql` — domain tables and initial editable configuration.
+- `drizzle/postgres/` — PostgreSQL schema migrations and initial editable configuration.
+- `neon.ts` — Managed Auth and private `assets` bucket infrastructure configuration.
 - `client/public/manus-routes.json` — frontend route manifest.
 
 ## Data and governance controls
