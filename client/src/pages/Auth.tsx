@@ -115,6 +115,12 @@ export default function Auth({ initialMode }: AuthProps = {}) {
           name: trimmedName,
         });
         if (result.error) throw new Error(result.error.message);
+        const session = await authClient.getSession();
+        if (session.error) throw new Error(session.error.message);
+        if (!session.data?.session) {
+          setError("Account created. Verify your email if prompted, then sign in.");
+          return;
+        }
       } catch (cause) {
         const message =
           cause instanceof Error ? cause.message : "Registration failed";

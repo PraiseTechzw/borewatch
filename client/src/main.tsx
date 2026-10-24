@@ -11,6 +11,9 @@ const trpcClient = trpc.createClient({ links: [httpBatchLink({
   url: "/api/trpc",
   transformer: superjson,
   headers: async () => {
+    const session = await authClient.getSession();
+    if (session.error) throw new Error(session.error.message);
+    if (!session.data?.session) return {};
     const { data, error } = await authClient.token();
     if (error) throw new Error(error.message);
     return data?.token ? { authorization: `Bearer ${data.token}` } : {};

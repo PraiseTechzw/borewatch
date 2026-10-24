@@ -7,8 +7,6 @@ import * as db from "../db";
 type NeonAuthClaims = {
   sub: string;
   email: string;
-  name?: string;
-  email_verified?: boolean;
 };
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
@@ -37,8 +35,6 @@ export async function authenticateRequest(req: Request): Promise<User | null> {
     claims = {
       sub: payload.sub,
       email: payload.email,
-      name: typeof payload.name === "string" ? payload.name : undefined,
-      email_verified: payload.email_verified === true,
     };
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
@@ -47,12 +43,14 @@ export async function authenticateRequest(req: Request): Promise<User | null> {
     throw error;
   }
 
-  const email = claims.email.trim().toLowerCase();
+  const identity = await db.getNeonAuthIdentity(claims.sub);
+  if (!identity || identity.email.trim().toLowerCase() !== claims.email.trim().toLowerCase()) return null;
+  const email = identity.email.trim().toLowerCase();
   if (!email) return null;
   return db.syncNeonUser({
     neonUserId: claims.sub,
     email,
-    name: claims.name ?? null,
-    verifiedOwner: claims.email_verified === true && ENV.ownerEmail === email,
+    name: identity.name,
+    verifiedOwner: identity.emailVerified && ENV.ownerEmail === email,
   });
 }
