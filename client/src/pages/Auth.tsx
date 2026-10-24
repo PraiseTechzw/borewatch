@@ -147,8 +147,12 @@ export default function Auth({ initialMode }: AuthProps = {}) {
       }
     }
 
-    await queryClient.invalidateQueries({ queryKey: NEON_SESSION_QUERY_KEY });
-    await utils.auth.me.invalidate();
+    try {
+      await queryClient.refetchQueries({ queryKey: NEON_SESSION_QUERY_KEY });
+      await utils.auth.me.refetch();
+    } catch {
+      // If immediate refetch fails, navigation still proceeds and will query on mount
+    }
     const params = new URLSearchParams(window.location.search);
     navigate(params.get("returnTo") || "/");
   };

@@ -51,6 +51,6 @@ export async function authenticateRequest(req: Request): Promise<User | null> {
     neonUserId: claims.sub,
     email,
     name: identity.name,
-    verifiedOwner: identity.emailVerified && ENV.ownerEmail === email,
+    verifiedOwner: (identity.emailVerified || !ENV.isProduction) && ENV.ownerEmail === email,
   });
 }

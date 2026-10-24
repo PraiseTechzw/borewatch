@@ -42,6 +42,8 @@ export function useAuth(options?: UseAuthOptions) {
     if (
       redirectOnUnauthenticated &&
       !sessionQuery.isLoading &&
+      !sessionQuery.isPending &&
+      !sessionQuery.isFetching &&
       !sessionQuery.error &&
       sessionQuery.data !== true &&
       window.location.pathname !== redirectPath
@@ -55,15 +57,17 @@ export function useAuth(options?: UseAuthOptions) {
           : redirectPath;
       window.location.assign(destination);
     }
-  }, [redirectOnUnauthenticated, redirectPath, sessionQuery.data, sessionQuery.error, sessionQuery.isLoading]);
+  }, [redirectOnUnauthenticated, redirectPath, sessionQuery.data, sessionQuery.error, sessionQuery.isFetching, sessionQuery.isLoading, sessionQuery.isPending]);
 
   const user = meQuery.data ?? null;
+  const isMeLoading = sessionQuery.data === true && (meQuery.isLoading || meQuery.isPending || (meQuery.data === undefined && !meQuery.error));
+  const loading = sessionQuery.isLoading || sessionQuery.isPending || isMeLoading;
 
   return {
     user,
     role: user?.role ?? null,
     isAdmin: user?.role === "admin",
-    loading: sessionQuery.isLoading || (sessionQuery.data === true && meQuery.isLoading),
+    loading,
     error: sessionQuery.error ?? meQuery.error ?? null,
     isAuthenticated: Boolean(user),
     refresh: async () => {

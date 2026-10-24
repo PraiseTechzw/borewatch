@@ -11,12 +11,13 @@ const trpcClient = trpc.createClient({ links: [httpBatchLink({
   url: "/api/trpc",
   transformer: superjson,
   headers: async () => {
-    const session = await authClient.getSession();
-    if (session.error) throw new Error(session.error.message);
-    if (!session.data?.session) return {};
-    const { data, error } = await authClient.token();
-    if (error) throw new Error(error.message);
-    return data?.token ? { authorization: `Bearer ${data.token}` } : {};
+    try {
+      const session = await authClient.getSession();
+      const token = session.data?.session?.token;
+      return token ? { authorization: `Bearer ${token}` } : {};
+    } catch {
+      return {};
+    }
   },
 })] });
 createRoot(document.getElementById("root")!).render(<trpc.Provider client={trpcClient} queryClient={queryClient}><QueryClientProvider client={queryClient}><App /></QueryClientProvider></trpc.Provider>);
