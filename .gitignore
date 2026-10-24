@@ -109,5 +109,5 @@ temp/
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
 
-# Manus version file (auto-generated, not part of source)
+# Generated version metadata (not part of source)
 client/public/__manus__/version.json
