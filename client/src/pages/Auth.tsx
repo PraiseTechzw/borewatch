@@ -7,7 +7,9 @@ import {
   Loader2,
   Lock,
   LogIn,
+  Mail,
   ShieldCheck,
+  UserRound,
   UserCheck,
   X,
 } from "lucide-react";
@@ -225,16 +227,19 @@ export default function Auth({ initialMode }: AuthProps = {}) {
             {mode === "register" && (
               <div className="auth-field-group">
                 <label htmlFor={nameId}>Full name</label>
-                <input
-                  id={nameId}
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Eng. T. Moyo"
-                  required
-                  autoComplete="name"
-                  disabled={pending}
-                />
+                <div className="auth-input-with-icon">
+                  <input
+                    id={nameId}
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Eng. T. Moyo"
+                    required
+                    autoComplete="name"
+                    disabled={pending}
+                  />
+                  <UserRound size={15} className="auth-input-icon" aria-hidden="true" />
+                </div>
                 <span className="field-note">
                   Used for inspection signatures and workflow audit history.
                 </span>
@@ -243,16 +248,19 @@ export default function Auth({ initialMode }: AuthProps = {}) {
 
             <div className="auth-field-group">
               <label htmlFor={emailId}>Email address</label>
-              <input
-                id={emailId}
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="officer@zinwa.co.zw or user@domain.com"
-                required
-                autoComplete="email"
-                disabled={pending}
-              />
+              <div className="auth-input-with-icon">
+                <input
+                  id={emailId}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="officer@zinwa.co.zw or user@domain.com"
+                  required
+                  autoComplete="email"
+                  disabled={pending}
+                />
+                <Mail size={15} className="auth-input-icon" aria-hidden="true" />
+              </div>
               <span className="field-note">
                 Your primary account email for system authentication.
               </span>
@@ -275,6 +283,7 @@ export default function Auth({ initialMode }: AuthProps = {}) {
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
                   disabled={pending}
                 />
+                <Lock size={15} className="auth-input-icon" aria-hidden="true" />
                 <button
                   type="button"
                   className="input-action-btn"
@@ -319,6 +328,7 @@ export default function Auth({ initialMode }: AuthProps = {}) {
                     autoComplete="new-password"
                     disabled={pending}
                   />
+                  <Lock size={15} className="auth-input-icon" aria-hidden="true" />
                   <button
                     type="button"
                     className="input-action-btn"
@@ -391,27 +401,6 @@ export default function Auth({ initialMode }: AuthProps = {}) {
           </div>
         </section>
 
-        {/* Security & Boundary explanation */}
-        <aside className="auth-security-info">
-          <div className="auth-security-card">
-            <Lock size={15} className="security-icon" />
-            <div>
-              <b>Server-authenticated session</b>
-              <p>
-                Sessions use HTTP-only SameSite cookies and bcrypt password hashing. Roles and permissions are validated by the BoreWatch application server.
-              </p>
-            </div>
-          </div>
-          <div className="auth-boundary-card">
-            <ShieldCheck size={15} className="boundary-icon" />
-            <div>
-              <b>Hosting boundary</b>
-              <p>
-                GitHub Pages hosts public documentation and demonstration maps. Authenticated records, screening workflows, and audit history are served securely from the project database.
-              </p>
-            </div>
-          </div>
-        </aside>
       </div>
     </main>
   );

@@ -257,10 +257,23 @@
   color: #a4b2aa;
 }
 
+.auth-input-with-icon,
 .input-with-action {
   position: relative;
   display: flex;
   align-items: center;
+}
+
+.auth-input-with-icon input,
+.input-with-action input {
+  padding-left: 34px;
+}
+
+.auth-input-icon {
+  position: absolute;
+  left: 10px;
+  color: #84958c;
+  pointer-events: none;
 }
 
 .input-with-action input {
@@ -361,53 +374,6 @@
 
 .auth-switch-link:hover {
   color: #104f48;
-}
-
-.auth-security-info {
-  margin-top: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.auth-security-card,
-.auth-boundary-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 7px;
-  font-size: 9.5px;
-  line-height: 1.45;
-  background: #ffffffa6;
-  border: 1px solid #dce5df;
-  backdrop-filter: blur(4px);
-}
-
-.auth-security-card b,
-.auth-boundary-card b {
-  display: block;
-  color: #35473e;
-  font-size: 10px;
-  margin-bottom: 2px;
-}
-
-.auth-security-card p,
-.auth-boundary-card p {
-  margin: 0;
-  color: #6e7f76;
-}
-
-.security-icon {
-  color: #176b63;
-  flex: none;
-  margin-top: 2px;
-}
-
-.boundary-icon {
-  color: #a67931;
-  flex: none;
-  margin-top: 2px;
 }
 
 /* Sidebar Profile & Topbar User styles */
