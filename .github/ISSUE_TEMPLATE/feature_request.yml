@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a prototype improvement or validated future capability.
+title: "[Enhancement]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        BoreWatch is a proposed student-project prototype. Suggestions must not assume regulatory approval, authoritative datasets, or legal decision authority.
+  - type: textarea
+    id: need
+    attributes:
+      label: User need
+      description: Who needs this and what task are they trying to complete?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful change and how a user would interact with it.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Validation, data and privacy considerations
+      description: Note any stakeholder, delegated-authority, data-source, privacy or accessibility validation needed.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: This request does not include real personal data, private site coordinates, credentials, or sensitive documents.
+          required: true

@@ -39,4 +39,4 @@
 - [x] Apply the approved field-station cartography direction, with Survey teal, readable hierarchy, source/recency tags and subtle contour motifs.
 - [x] Support keyboard access, visible focus, semantic buttons/inputs, adequate contrast, and reduced-motion preferences.
 - [x] Maintain `client/public/manus-routes.json` synchronized with page routes; run TypeScript and production build checks; verify the dev server and route manifest.
-- [ ] Save the completed implementation as a checkpoint on the canonical project repository; do not publish without a separate request.
+- [x] Save the completed implementation as a checkpoint on the canonical project repository; do not publish without a separate request.

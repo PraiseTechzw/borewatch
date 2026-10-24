@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible defect in the BoreWatch prototype.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report only synthetic or non-sensitive examples. Do not include personal information, credentials, private site coordinates, or sensitive evidence.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic demo records only.
+      placeholder: "1. Open ... 2. Select ... 3. Observe ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Dashboard/navigation
+        - Borehole register
+        - Applications
+        - GIS screening
+        - Inspections
+        - Follow-up actions
+        - Reports/administration
+        - Accessibility/responsive layout
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Browser and screen size
+      placeholder: "Browser/version, operating system, approximate viewport"
+    validations:
+      required: false
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I used synthetic/non-sensitive data and did not attach personal or restricted information.
+          required: true
