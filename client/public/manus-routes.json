@@ -1,1 +1,20 @@
-{"routes":[{"path":"/","title":"Borehole monitoring dashboard"},{"path":"/404","title":"Not found"}]}
+{
+  "routes": [
+    {
+      "path": "/",
+      "title": "Borehole monitoring dashboard"
+    },
+    {
+      "path": "/login",
+      "title": "Sign in"
+    },
+    {
+      "path": "/register",
+      "title": "Create account"
+    },
+    {
+      "path": "/404",
+      "title": "Not found"
+    }
+  ]
+}

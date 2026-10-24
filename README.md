@@ -45,11 +45,16 @@ Requirements: Node.js compatible with the pinned toolchain, pnpm 10.18.0, and a 
 
 ```bash
 pnpm install --frozen-lockfile
+```
+
+Copy `.env.example` to `.env` and set `DATABASE_URL` to your MySQL-compatible database connection string. Set `OWNER_EMAIL` if an account should receive the initial platform administrator role. `PORT` defaults to `3000`; `FORGE_API_URL` and `FORGE_API_KEY` are only needed if the Forge file-storage integration is enabled. Do not commit `.env` or credentials.
+
+Then apply the migrations and start the server:
+
+```bash
 pnpm db:migrate
 pnpm dev
 ```
-
-Required server environment includes `DATABASE_URL`, `SESSION_SECRET`, and optionally `OWNER_EMAIL` for the initial platform administrator. Do not commit environment files or credentials.
 
 Validate before deployment:
 
