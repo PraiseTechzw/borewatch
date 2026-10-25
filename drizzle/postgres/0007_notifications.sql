@@ -1,4 +1,4 @@
-CREATE TABLE "notifications" (
+CREATE TABLE IF NOT EXISTS "notifications" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"type" varchar(48) NOT NULL,

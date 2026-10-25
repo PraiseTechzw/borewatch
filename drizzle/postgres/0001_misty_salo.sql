@@ -1,4 +1,4 @@
-CREATE TABLE "follow_up_actions" (
+CREATE TABLE IF NOT EXISTS "follow_up_actions" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"inspection_id" integer NOT NULL,
 	"borehole_id" integer NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE "follow_up_actions" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "inspections" (
+CREATE TABLE IF NOT EXISTS "inspections" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"reference" varchar(64) NOT NULL,
 	"borehole_id" integer NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE "inspections" (
 	CONSTRAINT "inspections_reference_unique" UNIQUE("reference")
 );
 --> statement-breakpoint
-CREATE TABLE "screening_results" (
+CREATE TABLE IF NOT EXISTS "screening_results" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"borehole_id" integer NOT NULL,
 	"rule_key" varchar(96),
@@ -47,7 +47,7 @@ CREATE TABLE "screening_results" (
 	"assessed_by" integer NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "screening_rules" (
+CREATE TABLE IF NOT EXISTS "screening_rules" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"rule_key" varchar(96) NOT NULL,
 	"name" varchar(255) NOT NULL,
@@ -66,7 +66,7 @@ CREATE TABLE "screening_rules" (
 	CONSTRAINT "screening_rules_rule_key_unique" UNIQUE("rule_key")
 );
 --> statement-breakpoint
-ALTER TABLE "applications" ADD COLUMN "application_type" varchar(96) DEFAULT 'borehole_registration' NOT NULL;--> statement-breakpoint
-ALTER TABLE "borehole_records" ADD COLUMN "location_description" text;--> statement-breakpoint
-ALTER TABLE "borehole_records" ADD COLUMN "technical_details_json" text;--> statement-breakpoint
-ALTER TABLE "borehole_records" ADD COLUMN "verified_at" timestamp with time zone;
+ALTER TABLE "applications" ADD COLUMN IF NOT EXISTS "application_type" varchar(96) DEFAULT 'borehole_registration' NOT NULL;--> statement-breakpoint
+ALTER TABLE "borehole_records" ADD COLUMN IF NOT EXISTS "location_description" text;--> statement-breakpoint
+ALTER TABLE "borehole_records" ADD COLUMN IF NOT EXISTS "technical_details_json" text;--> statement-breakpoint
+ALTER TABLE "borehole_records" ADD COLUMN IF NOT EXISTS "verified_at" timestamp with time zone;

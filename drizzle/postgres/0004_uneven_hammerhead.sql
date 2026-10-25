@@ -1,4 +1,4 @@
-CREATE TABLE "responsible_parties" (
+CREATE TABLE IF NOT EXISTS "responsible_parties" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"borehole_id" integer NOT NULL,
 	"display_name" varchar(255) NOT NULL,
@@ -11,5 +11,5 @@ CREATE TABLE "responsible_parties" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "borehole_records" ADD COLUMN "party_id" integer;--> statement-breakpoint
-CREATE UNIQUE INDEX "responsible_parties_borehole_unique" ON "responsible_parties" USING btree ("borehole_id");
+ALTER TABLE "borehole_records" ADD COLUMN IF NOT EXISTS "party_id" integer;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "responsible_parties_borehole_unique" ON "responsible_parties" USING btree ("borehole_id");

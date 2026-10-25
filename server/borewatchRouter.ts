@@ -33,6 +33,7 @@ const coordinate = (min: number, max: number) => z.string().refine((value) => {
   return Number.isFinite(number) && number >= min && number <= max;
 }, "Coordinate must be a valid decimal-degree value in range");
 const applicationSiteDetails = z.object({ siteName: z.string().trim().min(1).max(255), district: z.string().trim().min(1).max(160), purpose: z.string().trim().min(1).max(160), locationDescription: z.string().trim().max(1000).optional(), latitude: coordinate(-90, 90), longitude: coordinate(-180, 180), responsiblePartyName: z.string().trim().min(1).max(255), responsiblePartyOrganization: z.string().trim().max(255).optional(), contactEmail: z.string().trim().email().max(320).optional(), contactPhone: z.string().trim().max(64).optional() });
+const applicationSiteDraft = z.object({ siteName: z.string().trim().max(255).optional(), district: z.string().trim().max(160).optional(), purpose: z.string().trim().max(160).optional(), locationDescription: z.string().trim().max(1000).optional(), latitude: z.string().optional(), longitude: z.string().optional(), responsiblePartyName: z.string().trim().max(255).optional(), responsiblePartyOrganization: z.string().trim().max(255).optional(), contactEmail: z.string().trim().max(320).optional(), contactPhone: z.string().trim().max(64).optional() });
 const dbOrThrow = async () => {
   const db = await getDb();
   if (!db) throw new Error("Database is not available; configure DATABASE_URL before using the authenticated application");
@@ -228,7 +229,7 @@ export const borewatchRouter = router({
       return db.select().from(applications).where(eq(applications.applicantId, ctx.user!.id)).orderBy(desc(applications.updatedAt));
     }),
     create: permissionProcedure("application:create")
-      .input(z.object({ boreholeId: z.number().int().positive().optional(), applicationType: z.string().trim().min(1).max(96).default("borehole_registration"), localAuthorityValue: z.string().trim().max(255).optional(), completeness: z.record(z.string(), z.boolean()).optional(), siteDetails: applicationSiteDetails.optional() }))
+      .input(z.object({ boreholeId: z.number().int().positive().optional(), applicationType: z.string().trim().min(1).max(96).default("borehole_registration"), localAuthorityValue: z.string().trim().max(255).optional(), completeness: z.record(z.string(), z.boolean()).optional(), siteDetails: applicationSiteDraft.optional() }))
       .mutation(async ({ ctx, input }) => {
         const db = await dbOrThrow();
         if (input.boreholeId) {
@@ -238,18 +239,23 @@ export const borewatchRouter = router({
           if (record.createdBy !== ctx.user!.id && !permissions.has("*") && !permissions.has("application:review")) throw new TRPCError({ code: "FORBIDDEN", message: "You cannot link an application to this borehole record" });
         }
         const reference = `APP-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
-        await db.insert(applications).values({ reference, boreholeId: input.boreholeId, applicantId: ctx.user!.id, stage: "draft", applicationType: input.applicationType, localAuthorityValue: input.localAuthorityValue, completenessJson: JSON.stringify(input.completeness ?? {}), siteDetailsJson: input.siteDetails ? JSON.stringify(input.siteDetails) : null, updatedBy: ctx.user!.id });
-        const [application] = await db.select().from(applications).where(eq(applications.reference, reference)).limit(1);
-        await audit(ctx.user!.id, "application.created", "application", reference, { applicationType: input.applicationType, boreholeId: input.boreholeId, localAuthorityValue: input.localAuthorityValue, siteDetailsProvided: Boolean(input.siteDetails), checklistKeys: Object.keys(input.completeness ?? {}) });
+        const application = await db.transaction(async (tx) => {
+          const [created] = await tx.insert(applications).values({ reference, boreholeId: input.boreholeId, applicantId: ctx.user!.id, stage: "draft", applicationType: input.applicationType, localAuthorityValue: input.localAuthorityValue, completenessJson: JSON.stringify(input.completeness ?? {}), siteDetailsJson: input.siteDetails ? JSON.stringify(input.siteDetails) : null, updatedBy: ctx.user!.id }).returning();
+          await tx.insert(auditEvents).values({ actorId: ctx.user!.id, action: "application.created", resourceType: "application", resourceId: reference, detailJson: JSON.stringify({ applicationType: input.applicationType, boreholeId: input.boreholeId, localAuthorityValue: input.localAuthorityValue, siteDetailsProvided: Boolean(input.siteDetails), checklistKeys: Object.keys(input.completeness ?? {}) }) });
+          return created;
+        });
         return application;
       }),
-    updateDraft: protectedProcedure.input(z.object({ applicationId: z.number().int().positive(), applicationType: z.string().trim().min(1).max(96), completeness: z.record(z.string(), z.boolean()), localAuthorityValue: z.string().trim().max(255).nullable().optional(), siteDetails: applicationSiteDetails.optional() })).mutation(async ({ ctx, input }) => {
+    updateDraft: protectedProcedure.input(z.object({ applicationId: z.number().int().positive(), applicationType: z.string().trim().min(1).max(96), completeness: z.record(z.string(), z.boolean()), localAuthorityValue: z.string().trim().max(255).nullable().optional(), siteDetails: applicationSiteDraft.optional() })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const [application] = await db.select().from(applications).where(eq(applications.id, input.applicationId)).limit(1);
       if (!application) throw new TRPCError({ code: "NOT_FOUND", message: "Application not found" });
       if (application.applicantId !== ctx.user!.id || application.stage !== "draft") throw new TRPCError({ code: "FORBIDDEN", message: "Only the applicant may update an application draft" });
-      const [updated] = await db.update(applications).set({ applicationType: input.applicationType, completenessJson: JSON.stringify(input.completeness), localAuthorityValue: input.localAuthorityValue, siteDetailsJson: input.siteDetails ? JSON.stringify(input.siteDetails) : application.siteDetailsJson, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(applications.id, application.id)).returning();
-      await audit(ctx.user!.id, "application.draft_updated", "application", application.reference, { applicationType: input.applicationType, localAuthorityValue: input.localAuthorityValue, siteDetailsProvided: Boolean(input.siteDetails), checklistKeys: Object.keys(input.completeness) });
+      const updated = await db.transaction(async (tx) => {
+        const [saved] = await tx.update(applications).set({ applicationType: input.applicationType, completenessJson: JSON.stringify(input.completeness), localAuthorityValue: input.localAuthorityValue, siteDetailsJson: input.siteDetails ? JSON.stringify(input.siteDetails) : application.siteDetailsJson, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(applications.id, application.id)).returning();
+        await tx.insert(auditEvents).values({ actorId: ctx.user!.id, action: "application.draft_updated", resourceType: "application", resourceId: application.reference, detailJson: JSON.stringify({ applicationType: input.applicationType, localAuthorityValue: input.localAuthorityValue, siteDetailsProvided: Boolean(input.siteDetails), checklistKeys: Object.keys(input.completeness) }) });
+        return saved;
+      });
       return updated;
     }),
     transition: protectedProcedure
@@ -283,16 +289,19 @@ export const borewatchRouter = router({
           if (missingFiles.length) throw new TRPCError({ code: "BAD_REQUEST", message: `Upload the supporting documents checked on the application: ${missingFiles.join(", ")}` });
         }
         if (input.toStage === "decision_recorded" && !input.decisionOutcome) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose an outcome for the human decision" });
-        await db.update(applications).set({ stage: input.toStage, decisionOutcome: input.toStage === "decision_recorded" ? input.decisionOutcome : application.decisionOutcome, decisionConditions: input.toStage === "decision_recorded" ? input.decisionConditions : application.decisionConditions, updatedBy: ctx.user!.id, submittedAt: input.toStage === "submitted" ? new Date() : application.submittedAt }).where(eq(applications.id, application.id));
-        if (input.toStage === "decision_recorded") await db.insert(decisionRecords).values({ applicationId: application.id, outcome: input.decisionOutcome!, reason: input.reason!, conditions: input.decisionConditions ?? null, decidedBy: ctx.user!.id });
-        await db.insert(workflowEvents).values({ applicationId: application.id, fromStage: application.stage, toStage: input.toStage, actorId: ctx.user!.id, reason: input.reason });
-        await audit(ctx.user!.id, "application.transitioned", "application", application.reference, input);
+        const updated = await db.transaction(async (tx) => {
+          const [saved] = await tx.update(applications).set({ stage: input.toStage, decisionOutcome: input.toStage === "decision_recorded" ? input.decisionOutcome : application.decisionOutcome, decisionConditions: input.toStage === "decision_recorded" ? input.decisionConditions : application.decisionConditions, updatedBy: ctx.user!.id, submittedAt: input.toStage === "submitted" ? new Date() : application.submittedAt }).where(eq(applications.id, application.id)).returning();
+          if (input.toStage === "decision_recorded") await tx.insert(decisionRecords).values({ applicationId: application.id, outcome: input.decisionOutcome!, reason: input.reason!, conditions: input.decisionConditions ?? null, decidedBy: ctx.user!.id });
+          await tx.insert(workflowEvents).values({ applicationId: application.id, fromStage: application.stage, toStage: input.toStage, actorId: ctx.user!.id, reason: input.reason });
+          await tx.insert(auditEvents).values({ actorId: ctx.user!.id, action: "application.transitioned", resourceType: "application", resourceId: application.reference, detailJson: JSON.stringify(input) });
+          return saved;
+        });
         if (ctx.user!.id !== application.applicantId) {
           await notifyUser(application.applicantId, "application", "Application status updated", `${application.reference} moved to ${input.toStage.replaceAll("_", " ")}.${input.reason ? ` ${input.reason}` : ""}`, "application", application.id);
         } else if (input.toStage === "submitted" || input.toStage === "under_review") {
           await notifyPermissionHolders("application:review", "application", "Application needs review", `${application.reference} is ready for officer review.`, "application", application.id);
         }
-        return db.select().from(applications).where(eq(applications.id, application.id)).limit(1).then(([updated]) => updated);
+        return updated;
       }),
     history: protectedProcedure.input(z.object({ applicationId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const db = await dbOrThrow();
@@ -315,10 +324,13 @@ export const borewatchRouter = router({
       const [application] = await db.select().from(applications).where(eq(applications.id, input.applicationId)).limit(1);
       if (!application) throw new TRPCError({ code: "NOT_FOUND", message: "Application not found" });
       if (application.stage !== "decision_recorded") throw new TRPCError({ code: "CONFLICT", message: "Only a recorded decision can be corrected" });
-      const previous = await db.select().from(decisionRecords).where(eq(decisionRecords.applicationId, application.id)).orderBy(desc(decisionRecords.decidedAt)).limit(1);
-      const [decision] = await db.insert(decisionRecords).values({ applicationId: application.id, outcome: input.outcome, reason: input.reason, conditions: input.conditions ?? null, decidedBy: ctx.user!.id, supersedesId: previous[0]?.id ?? null }).returning();
-      await db.update(applications).set({ decisionOutcome: input.outcome, decisionConditions: input.conditions ?? null, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(applications.id, application.id));
-      await audit(ctx.user!.id, "application.decision_corrected", "application", application.reference, { supersedesId: previous[0]?.id ?? null, outcome: input.outcome, reason: input.reason });
+      const decision = await db.transaction(async (tx) => {
+        const previous = await tx.select().from(decisionRecords).where(eq(decisionRecords.applicationId, application.id)).orderBy(desc(decisionRecords.decidedAt)).limit(1);
+        const [saved] = await tx.insert(decisionRecords).values({ applicationId: application.id, outcome: input.outcome, reason: input.reason, conditions: input.conditions ?? null, decidedBy: ctx.user!.id, supersedesId: previous[0]?.id ?? null }).returning();
+        await tx.update(applications).set({ decisionOutcome: input.outcome, decisionConditions: input.conditions ?? null, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(applications.id, application.id));
+        await tx.insert(auditEvents).values({ actorId: ctx.user!.id, action: "application.decision_corrected", resourceType: "application", resourceId: application.reference, detailJson: JSON.stringify({ supersedesId: previous[0]?.id ?? null, outcome: input.outcome, reason: input.reason }) });
+        return saved;
+      });
       await notifyUser(application.applicantId, "application", "Application decision corrected", `${application.reference} has a corrected decision. Reason: ${input.reason}`, "application", application.id);
       return decision;
     }),

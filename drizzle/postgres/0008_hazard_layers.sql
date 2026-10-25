@@ -1,4 +1,4 @@
-CREATE TABLE "hazard_layers" (
+CREATE TABLE IF NOT EXISTS "hazard_layers" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"layer_key" varchar(96) NOT NULL,
 	"name" varchar(255) NOT NULL,

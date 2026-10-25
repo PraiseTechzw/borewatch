@@ -3,24 +3,28 @@
 ## Implemented in the current server-backed release
 
 - [x] Neon Managed Auth registration, sign-in, sessions and password changes.
-- [x] PostgreSQL persistence for borehole records, responsible parties, applications, workflow history, inspections, follow-up actions, screening metadata/results, source metadata and audit events.
-- [x] Server-side permission checks for record scope, private evidence, application actions, inspection assignment/submission/review, follow-up ownership, administration and reports.
-- [x] Borehole register with coordinate validation, technical details, operational lifecycle fields and restricted responsible-party contacts.
-- [x] Application drafts, completeness checklist, categorized private evidence, applicant response, review transitions and reasoned decisions.
-- [x] Responsive assigned-inspection workflow with coordinate confirmation, checklist, observations, findings, recommendations, evidence and immutable submitted findings.
-- [x] Follow-up assignments with owners, due dates and tracked status.
-- [x] Coordinate-grid visualization, record filters, source/rule provenance display, and honest `unable_to_assess` results when verified inputs are absent.
-- [x] Authorized reports with filters and audited CSV export.
-- [x] Role management, source/rule metadata and workflow configuration, plus read-only audit history.
-- [x] Responsive layouts and accessible keyboard interactions for principal record and map workflows.
+- [x] PostgreSQL persistence for boreholes, responsible parties, applications, documents/evidence, decisions, inspections, follow-up actions, hazard-layer metadata, screening rules/results, notifications and audit events.
+- [x] Server-side role and record-scope checks for applications, private evidence, assigned inspections, follow-up owners, screening, reports and administration.
+- [x] Borehole register with unique references, coordinate validation, technical fields, commissioning/decommissioning details and restricted contact data.
+- [x] Application drafts with site/applicant fields, completeness checklist, categorized private evidence, information requests, applicant responses and authorized decisions.
+- [x] Append-only decision correction history with reason and superseded-decision reference.
+- [x] Inspection assignment, mobile-friendly checklist, coordinate confirmation, evidence, immutable findings and review workflow.
+- [x] Owned follow-up actions, due dates, status updates and overdue in-app alerts.
+- [x] Private GeoJSON hazard-layer import with CRS, source, version, date, accuracy, license and verification metadata.
+- [x] Explainable point-to-layer distance screening, rule/version provenance, stale/missing data handling and human-review flags. Test layers require verified data-source metadata; no data or threshold is seeded as official.
+- [x] Borehole and authorized layer map overlays on a coordinate grid, plus filters and screening history. No external basemap is loaded.
+- [x] Authorized, audited CSV and print/save-as-PDF reports.
+- [x] In-app notifications for application, inspection, follow-up and screening events, with read state.
+- [x] Offline shell caching and device-local drafts for application and inspection forms. API writes/evidence upload still require a network connection; drafts are not background-synced.
+- [x] Role and source/rule/layer administration, workflow configuration and read-only audit view.
+- [x] Production schema migrations applied after successful migration on a one-day Neon validation branch.
 
-## Remaining before evaluation or operational adoption
+## Remaining before the project can claim validated operational readiness
 
-- [ ] Obtain permitted, suitable geospatial layers and implement/validate spatial intersection or distance calculations against test cases. The current map is a coordinate grid, not a GIS basemap or spatial analysis engine.
-- [ ] Validate role names, workflow stages, decision powers and screening criteria with the selected authority and pilot stakeholders. No current configuration is an official rule or legal decision.
-- [ ] Define and implement notifications if required; current queues and overdue indicators are in-app views, not notification delivery.
-- [ ] Confirm personal-data handling, retention/deletion, data correction, backup/restore and deployment/security procedures with the responsible organization.
-- [ ] Run functional, access-control, spatial and usability evaluation with a documented authorized or synthetic test dataset.
-- [ ] Configure and verify the target Neon project and administrator account before deployment. Generated migrations have not been applied to a live database.
+- [ ] Select and document the pilot organization/area; validate role names, workflow stages, application document requirements, delegated decisions and retention with the responsible authority.
+- [ ] Obtain authorized, suitable hazard layers and approved screening criteria. Verify those inputs with a qualified authority/technical reviewer before activating operational rules.
+- [ ] Run and report the full functional/access-control/spatial test matrix and representative-user usability evaluation against authorized or clearly labeled synthetic data.
+- [ ] Define data correction, retention/deletion, backup/restore, file scanning, HTTPS deployment, monitoring, support and security procedures.
+- [ ] If the pilot needs full field work offline, implement and test encrypted/local evidence capture and conflict-safe synchronization; the current build only preserves form drafts on the device.
 
-Do not present the system as an official regulatory service or use it to make permit, contamination, safety or compliance determinations until the relevant authority, data and operational controls have been validated.
+The application is running locally and the production Neon migrations are applied. The system is a prototype, not an official regulatory service; screening is preliminary and does not certify contamination, water safety, compliance or legal authorization.

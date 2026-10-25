@@ -1,2 +1,2 @@
-ALTER TABLE "notifications" ADD COLUMN "dedupe_key" varchar(255);--> statement-breakpoint
-ALTER TABLE "notifications" ADD CONSTRAINT "notifications_dedupe_key_unique" UNIQUE("dedupe_key");
+ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "dedupe_key" varchar(255);--> statement-breakpoint
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'notifications_dedupe_key_unique') THEN ALTER TABLE "notifications" ADD CONSTRAINT "notifications_dedupe_key_unique" UNIQUE("dedupe_key"); END IF; END $$;

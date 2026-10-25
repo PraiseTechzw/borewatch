@@ -1,5 +1,5 @@
-ALTER TABLE "applications" ADD COLUMN "decision_outcome" varchar(48);--> statement-breakpoint
-ALTER TABLE "applications" ADD COLUMN "decision_conditions" text;--> statement-breakpoint
+ALTER TABLE "applications" ADD COLUMN IF NOT EXISTS "decision_outcome" varchar(48);--> statement-breakpoint
+ALTER TABLE "applications" ADD COLUMN IF NOT EXISTS "decision_conditions" text;--> statement-breakpoint
 UPDATE "workspace_roles"
 SET "permissions_json" = ("permissions_json"::jsonb || '["inspection:assign"]'::jsonb)::text
 WHERE "role_key" = 'reviewer' AND NOT ("permissions_json"::jsonb ? 'inspection:assign');

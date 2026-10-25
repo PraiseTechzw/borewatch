@@ -1,1 +1,1 @@
-ALTER TABLE "evidence_files" ADD COLUMN "document_type" varchar(96);
+ALTER TABLE "evidence_files" ADD COLUMN IF NOT EXISTS "document_type" varchar(96);

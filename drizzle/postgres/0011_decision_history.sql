@@ -1,4 +1,4 @@
-CREATE TABLE "decision_records" (
+CREATE TABLE IF NOT EXISTS "decision_records" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"application_id" integer NOT NULL,
 	"outcome" varchar(48) NOT NULL,

@@ -27,7 +27,7 @@ The system does not manufacture regulatory decisions. Roles, workflow stages, sc
 - Configurable ZINWA/local Sub-Catchment Council settings and data-layer access metadata.
 - No browser-session fallback for records or applications; the client reads and writes through the authenticated API.
 
-The current release also includes assigned inspections with private evidence and immutable submitted findings, owned follow-up actions, role assignment/removal, source and screening-rule metadata administration, workflow configuration, and authorized reports with audited CSV export. The GIS view plots permitted borehole coordinates on a latitude/longitude grid and stores explicit `unable_to_assess` screening history when verified layers or approved rules are unavailable. It does not load a basemap or perform spatial intersection/distance calculations. Notification delivery, offline synchronization and authority-approved screening criteria are not implemented. Seeded roles, workflow stages, source values and rules remain editable examples, not official configuration.
+The current release also includes assigned inspections with private evidence and immutable submitted findings, owned follow-up actions, role assignment/removal, source and screening-rule administration, verified GeoJSON layer import, versioned point-to-layer distance screening, workflow configuration, in-app notifications, local offline form drafts, and authorized audited CSV/print-to-PDF reports. The GIS view overlays permitted borehole coordinates and active spatial layers on a latitude/longitude grid; no external basemap is loaded. Missing, stale or unverified inputs produce “unable to assess.” Only active rules backed by verified source and layer metadata are calculated. A spatial match is a preliminary human-review flag, not proof of contamination or non-compliance. Offline form drafts are local only; server writes and file uploads require connectivity. Seeded roles, workflows and sources remain editable examples pending pilot-authority validation.
 
 ## Initial configuration
 
@@ -51,7 +51,7 @@ pnpm install --frozen-lockfile
 
 Copy `.env.example` to `.env.local`, then run `neon env pull` to populate the linked branch's Postgres, Managed Auth, and private Object Storage variables. Set `OWNER_EMAIL` to the intended administrator email; that account receives the administrator role only when Neon Auth marks the email verified. Never commit `.env.local` or credentials.
 
-Then apply the migrations and start the server:
+The current repository migrations have been tested on a temporary Neon branch and applied to the configured production branch. For a new environment, apply migrations and start the server:
 
 ```bash
 pnpm db:migrate
