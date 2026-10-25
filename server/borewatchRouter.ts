@@ -524,8 +524,8 @@ export const borewatchRouter = router({
       await audit(ctx.user!.id, "report.boreholes_viewed", "report", "boreholes", input);
       return rows;
     }),
-    logExport: permissionProcedure("report:view").input(z.object({ from: z.string().datetime().optional(), to: z.string().datetime().optional(), district: z.string().trim().max(160).optional(), operationalStatus: z.string().trim().max(64).optional(), rowCount: z.number().int().min(0).max(100000), notes: z.string().trim().max(2000).optional() })).mutation(async ({ ctx, input }) => {
-      await audit(ctx.user!.id, "report.csv_exported", "report", "boreholes", input);
+    logExport: permissionProcedure("report:view").input(z.object({ from: z.string().datetime().optional(), to: z.string().datetime().optional(), district: z.string().trim().max(160).optional(), operationalStatus: z.string().trim().max(64).optional(), rowCount: z.number().int().min(0).max(100000), notes: z.string().trim().max(2000).optional(), exportFormat: z.enum(["csv", "pdf"]).default("csv") })).mutation(async ({ ctx, input }) => {
+      await audit(ctx.user!.id, `report.${input.exportFormat}_exported`, "report", "boreholes", input);
       return { success: true } as const;
     }),
   }),
