@@ -4,6 +4,7 @@ import { userWorkspaceRoles, workspaceRoles, type User } from "../drizzle/schema
 
 export type Permission =
   | "record:view"
+  | "record:view_all"
   | "record:create"
   | "record:update"
   | "application:create"
@@ -12,6 +13,7 @@ export type Permission =
   | "application:transition"
   | "inspection:view_assigned"
   | "inspection:submit"
+  | "inspection:assign"
   | "screening:review"
   | "information:request"
   | "decision:record"
@@ -20,7 +22,8 @@ export type Permission =
   | "workflow:configure"
   | "user:manage"
   | "audit:view"
-  | "report:view";
+  | "report:view"
+  | "party:view";
 
 export async function getUserPermissions(user: User): Promise<Set<string>> {
   if (user.role === "admin") return new Set(["*"]);

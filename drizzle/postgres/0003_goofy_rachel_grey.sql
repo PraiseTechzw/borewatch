@@ -1,0 +1,1 @@
+ALTER TABLE "evidence_files" ADD COLUMN "document_type" varchar(96);

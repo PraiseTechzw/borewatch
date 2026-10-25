@@ -27,6 +27,8 @@ The system does not manufacture regulatory decisions. Roles, workflow stages, sc
 - Configurable ZINWA/local Sub-Catchment Council settings and data-layer access metadata.
 - No browser-session fallback for records or applications; the client reads and writes through the authenticated API.
 
+The current release also includes assigned inspections with private evidence and immutable submitted findings, owned follow-up actions, role assignment/removal, source and screening-rule metadata administration, workflow configuration, and authorized reports with audited CSV export. The GIS view plots permitted borehole coordinates on a latitude/longitude grid and stores explicit `unable_to_assess` screening history when verified layers or approved rules are unavailable. It does not load a basemap or perform spatial intersection/distance calculations. Notification delivery, offline synchronization and authority-approved screening criteria are not implemented. Seeded roles, workflow stages, source values and rules remain editable examples, not official configuration.
+
 ## Initial configuration
 
 The migration seeds editable configuration records for:
