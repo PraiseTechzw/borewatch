@@ -134,6 +134,35 @@ export const borewatchRouter = router({
     }),
   }),
   boreholes: router({
+    importBundledGeoJson: permissionProcedure("record:create").mutation(async ({ ctx }) => {
+      const permissions = await getUserPermissions(ctx.user!);
+      if (!permissions.has("*") && !permissions.has("record:view_all")) throw new TRPCError({ code: "FORBIDDEN", message: "Bulk borehole imports require all-record access" });
+      const sourceName = "borehole_database-1758978934.geojson";
+      let parsed: { type?: string; features?: Array<{ type?: string; geometry?: { type?: string; coordinates?: unknown[] }; properties?: Record<string, unknown> }> };
+      try { parsed = JSON.parse(await readFile(join(process.cwd(), "data/geospatial", sourceName), "utf8")); }
+      catch { throw new TRPCError({ code: "NOT_FOUND", message: "The supplied borehole GeoJSON is missing from data/geospatial" }); }
+      if (parsed.type !== "FeatureCollection" || !Array.isArray(parsed.features) || parsed.features.length > 20000) throw new TRPCError({ code: "BAD_REQUEST", message: "The bundled GeoJSON is not a supported FeatureCollection" });
+      const features = parsed.features.flatMap((feature) => {
+        const properties = feature.properties ?? {}; const coordinates = feature.geometry?.coordinates ?? [];
+        const recordCode = String(properties.natl_bhid ?? properties.national_bhid ?? properties.sadc_bhid ?? "").trim();
+        const longitude = Number(properties.long_wgs84 ?? coordinates[0]); const latitude = Number(properties.lat_wgs84 ?? coordinates[1]);
+        if (feature.geometry?.type !== "Point" || String(properties.country ?? "").toLowerCase() !== "zimbabwe" || !recordCode || !Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < 25 || longitude > 33.1 || latitude < -22.5 || latitude > -15.5) return [];
+        const sourceProperties: Record<string, string | number | boolean | null> = {};
+        for (const [key, value] of Object.entries(properties)) if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") sourceProperties[key] = typeof value === "string" ? value.slice(0, 1000) : value;
+        return [{ recordCode, latitude: String(latitude), longitude: String(longitude), sourceProperties }];
+      });
+      if (!features.length) throw new TRPCError({ code: "BAD_REQUEST", message: "No valid Zimbabwe borehole points were found in the bundled dataset" });
+      const db = await dbOrThrow(); const unique = new Map(features.map((feature) => [feature.recordCode, feature]));
+      const rows = [...unique.values()].map((feature) => ({ recordCode: feature.recordCode, siteName: feature.recordCode, district: "Unassigned (source data)", purpose: "Historical groundwater inventory", locationDescription: "Imported from the supplied GeoJSON; verify site details and coordinate datum before operational use.", technicalDetailsJson: JSON.stringify({ sourceDataset: sourceName, sourceProperties: feature.sourceProperties, coordinateDatum: "UNKNOWN (source metadata)", importStatus: "unverified" }), latitude: feature.latitude, longitude: feature.longitude, operationalStatus: "unverified", applicationStatus: "historical_import", screeningStatus: "unable_to_assess", createdBy: ctx.user!.id, updatedBy: ctx.user!.id }));
+      return db.transaction(async (tx) => {
+        let inserted = 0;
+        for (let offset = 0; offset < rows.length; offset += 500) inserted += (await tx.insert(boreholeRecords).values(rows.slice(offset, offset + 500)).onConflictDoNothing({ target: boreholeRecords.recordCode }).returning({ recordCode: boreholeRecords.recordCode })).length;
+        const skipped = parsed.features!.length - inserted;
+        await tx.insert(auditEvents).values({ actorId: ctx.user!.id, action: "borehole.geojson_imported", resourceType: "borehole_dataset", resourceId: sourceName, detailJson: JSON.stringify({ received: parsed.features!.length, valid: features.length, unique: rows.length, inserted, skipped, coordinateDatum: "UNKNOWN", operationalStatus: "unverified" }) });
+        await tx.update(dataSources).set({ accessStatus: `Imported ${inserted} borehole records from ${sourceName}; source datum unknown, verification pending.`, metadataJson: JSON.stringify({ provider: "User-supplied GeoJSON", datasetName: sourceName, importedAt: new Date().toISOString(), importedBy: ctx.user!.id, recordCount: inserted, verificationStatus: "unverified", coordinateDatum: "UNKNOWN" }), updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(dataSources.sourceKey, "boreholes_database"));
+        return { received: parsed.features!.length, valid: features.length, inserted, skipped };
+      });
+    }),
     importGeoJson: permissionProcedure("record:create")
       .input(z.object({
         sourceName: z.string().trim().min(1).max(255),

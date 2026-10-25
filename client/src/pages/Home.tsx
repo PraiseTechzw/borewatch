@@ -112,6 +112,7 @@ export default function Home() {
   useEffect(() => { if (!auth.user?.id || offlineDraftUser !== auth.user.id) return; try { localStorage.setItem(`borewatch:application-draft:${auth.user.id}`, JSON.stringify({ applicationType, boreholeId: applicationBoreholeId, completeness: applicationCompleteness, authority, siteDetails: applicationSiteDetails })); } catch { /* local storage may be disabled or full */ } }, [auth.user?.id, offlineDraftUser, applicationType, applicationBoreholeId, applicationCompleteness, authority, applicationSiteDetails]);
 
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3500); };
+  const importBundledBoreholes = trpc.borewatch.boreholes.importBundledGeoJson.useMutation({ onSuccess: async (result) => { await Promise.all([recordsQuery.refetch(), workspace.refetch()]); notify(`Supplied dataset imported: ${result.inserted} new boreholes, ${result.skipped} duplicates or excluded records.`); }, onError: (error) => notify(error.message) });
   const records = (recordsQuery.data ?? []) as RecordView[];
   const applications = applicationsQuery.data ?? [];
   const filtered = useMemo(() => records.filter((record) => `${record.recordCode} ${record.siteName} ${record.district} ${record.purpose}`.toLowerCase().includes(query.toLowerCase())), [records, query]);
