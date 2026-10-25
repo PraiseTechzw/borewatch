@@ -27,6 +27,8 @@ import { getUserPermissions } from "./permissions";
 import { geoJsonDistanceMeters, parseGeoJson } from "./screeningGeometry";
 import { deleteEvidence, getEvidenceUrl, uploadEvidence } from "./storage";
 import { TRPCError } from "@trpc/server";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 const coordinate = (min: number, max: number) => z.string().refine((value) => {
   const number = Number(value);
@@ -89,6 +91,16 @@ async function assertEvidenceAccess(user: User, entityType: "borehole" | "applic
 }
 
 export const borewatchRouter = router({
+  geospatial: router({
+    catchments: protectedProcedure.query(async () => {
+      const path = join(process.cwd(), "data/geospatial/catchments-1761164005/catchments-1761164004.geojson");
+      try {
+        return await readFile(path, "utf8");
+      } catch {
+        throw new TRPCError({ code: "NOT_FOUND", message: "The supplied catchment GeoJSON is missing from data/geospatial" });
+      }
+    }),
+  }),
   notifications: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await dbOrThrow();
@@ -122,6 +134,57 @@ export const borewatchRouter = router({
     }),
   }),
   boreholes: router({
+    importGeoJson: permissionProcedure("record:create")
+      .input(z.object({
+        sourceName: z.string().trim().min(1).max(255),
+        features: z.array(z.object({
+          recordCode: z.string().trim().min(1).max(64),
+          siteName: z.string().trim().min(1).max(255),
+          latitude: coordinate(-90, 90),
+          longitude: coordinate(-180, 180),
+          sourceProperties: z.record(z.string(), z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
+        })).min(1).max(20000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const permissions = await getUserPermissions(ctx.user!);
+        if (!permissions.has("*") && !permissions.has("record:view_all")) throw new TRPCError({ code: "FORBIDDEN", message: "Bulk borehole imports require all-record access" });
+        const invalidFeatures = input.features.filter((feature) => {
+          const country = String(feature.sourceProperties?.country ?? "").toLowerCase();
+          const latitude = Number(feature.latitude); const longitude = Number(feature.longitude);
+          return country !== "zimbabwe" || longitude < 25 || longitude > 33.1 || latitude < -22.5 || latitude > -15.5;
+        });
+        if (invalidFeatures.length) throw new TRPCError({ code: "BAD_REQUEST", message: `${invalidFeatures.length} feature(s) are not Zimbabwe borehole points within the dataset extent` });
+        const db = await dbOrThrow();
+        const unique = new Map<string, typeof input.features[number]>();
+        for (const feature of input.features) if (!unique.has(feature.recordCode)) unique.set(feature.recordCode, feature);
+        const rows = [...unique.values()].map((feature) => ({
+          recordCode: feature.recordCode,
+          siteName: feature.siteName,
+          district: "Unassigned (source data)",
+          purpose: "Historical groundwater inventory",
+          locationDescription: "Imported from a GeoJSON source; verify site details and coordinate datum before operational use.",
+          technicalDetailsJson: JSON.stringify({ sourceDataset: input.sourceName, sourceProperties: feature.sourceProperties ?? {}, coordinateDatum: "UNKNOWN (source metadata)", importStatus: "unverified" }),
+          latitude: feature.latitude,
+          longitude: feature.longitude,
+          operationalStatus: "unverified",
+          applicationStatus: "historical_import",
+          screeningStatus: "unable_to_assess",
+          createdBy: ctx.user!.id,
+          updatedBy: ctx.user!.id,
+        }));
+        return db.transaction(async (tx) => {
+          let inserted = 0;
+          for (let offset = 0; offset < rows.length; offset += 500) {
+            const batch = rows.slice(offset, offset + 500);
+            const created = await tx.insert(boreholeRecords).values(batch).onConflictDoNothing({ target: boreholeRecords.recordCode }).returning({ recordCode: boreholeRecords.recordCode });
+            inserted += created.length;
+          }
+          const skipped = input.features.length - inserted;
+          await tx.insert(auditEvents).values({ actorId: ctx.user!.id, action: "borehole.geojson_imported", resourceType: "borehole_dataset", resourceId: input.sourceName, detailJson: JSON.stringify({ received: input.features.length, unique: rows.length, inserted, skipped, coordinateDatum: "UNKNOWN", operationalStatus: "unverified" }) });
+          await tx.update(dataSources).set({ accessStatus: `Imported ${inserted} borehole records from ${input.sourceName}; source datum unknown, verification pending.`, metadataJson: JSON.stringify({ provider: "User-supplied GeoJSON", datasetName: input.sourceName, importedAt: new Date().toISOString(), importedBy: ctx.user!.id, recordCount: inserted, verificationStatus: "unverified", coordinateDatum: "UNKNOWN" }), updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(dataSources.sourceKey, "boreholes_database"));
+          return { received: input.features.length, inserted, skipped };
+        });
+      }),
     list: permissionProcedure("record:view").query(async ({ ctx }) => {
       const db = await dbOrThrow();
       const permissions = await getUserPermissions(ctx.user!);

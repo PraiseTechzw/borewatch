@@ -1,21 +1,14 @@
-# BoreWatch Zimbabwe geospatial data starter pack
+# Zimbabwe hydrogeology reference layer
 
-These are empty import templates, not operational datasets. No borehole locations or hazard extents have been fabricated. Do not activate an empty layer or treat it as evidence that hazards are absent.
+`client/public/datasets/zimbabwe-hydrogeology-reference.geojson` contains the 2,315 hydrogeological polygons from the IGRAC/SADC-GIP GeoPackage record [496](https://sadc-gip.org:4443/catalogue/#/document/496).
 
-## Coordinate format
+- Source title: *Georeferencing and digitizing the national hydrogeological map of Zimbabwe - GeoPackage file*.
+- Original hydrogeological map: 1986; digitization package published 20 December 2022.
+- License: CC BY-SA 4.0. Attribute IGRAC and SADC-GIP, and preserve this license for redistributed adaptations.
+- The source GeoPackage uses a custom Transverse Mercator CRS with an unspecified datum. The polygons were transformed to WGS 84 for the app's longitude/latitude canvas using PROJ's ballpark datum operation and simplified at 750 m for browser rendering.
+- This adapted layer is **visual reference context only**. Its approximate coordinate transformation and historical hydrogeology do not meet the app's verified-layer requirements. It is intentionally excluded from server-side screening and does not represent borehole locations or hazard determinations.
+- Only the hydrogeological polygon table was included; the GeoPackage's original raster, grid, geology linework, and boundary tables were not imported.
 
-- GeoJSON coordinates use **longitude, latitude** order in decimal degrees (WGS 84 / CRS84, equivalent to EPSG:4326 for this use).
-- Borehole capture CSV columns are **latitude, longitude** to make the field form readable. Convert to GeoJSON `[longitude, latitude]` when exporting.
-- Record how each point was captured, its accuracy, date, source record identifier, and verification status. Keep exact coordinates restricted where required by consent or policy.
-- The importer accepts GeoJSON geometry/Feature/FeatureCollection. Borehole CSV import is not currently implemented; use the template to collect/clean data, then create or update records through BoreWatch.
+## Borehole inventory imports
 
-## Files
-
-- `boreholes-template.geojson`: empty FeatureCollection to receive authorized point features. Suggested properties: `site_id`, `site_name`, `district`, `purpose`, `coordinate_accuracy_m`, `coordinate_captured_on`, `coordinate_source`, `source_record_id`, `verification_status`.
-- `borehole-coordinate-template.csv`: field-ready coordinate capture columns.
-- `groundwater-risk-template.geojson`: empty FeatureCollection for a reviewed hazard/vulnerability layer. It is intentionally not seeded with inferred risk polygons.
-- `sources.md`: researched source register, access/licensing notes, and operational use limits.
-
-## Importing a hazard layer
-
-Import only after a data owner or qualified authority confirms the source, license/permission, version, date, coverage, CRS, accuracy and meaning of the classes. Keep the layer inactive until a technical reviewer approves it. Configure screening rules separately and treat matches as review flags, never as proof of contamination, safety, compliance or legal status.
+The GIS screen accepts a GeoJSON FeatureCollection of Zimbabwe `Point` features with `country: "Zimbabwe"`, a national borehole ID (`natl_bhid`, `national_bhid`, or `sadc_bhid`), and WGS84 longitude/latitude properties (`long_wgs84`, `lat_wgs84`) or Point coordinates. The import flow previews valid and excluded counts before saving. It is restricted to users with record creation and all-record access. Imported rows retain the original feature properties in the protected database, are marked unverified, and are deduplicated by national borehole ID. The source file's datum is recorded as unknown; these imports do not create a screening clearance.
