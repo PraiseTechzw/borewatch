@@ -123,6 +123,17 @@ export const workflowEvents = pgTable("workflow_events", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const decisionRecords = pgTable("decision_records", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  outcome: varchar("outcome", { length: 48 }).notNull(),
+  reason: text("reason").notNull(),
+  conditions: text("conditions"),
+  decidedBy: integer("decided_by").notNull(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }).defaultNow().notNull(),
+  supersedesId: integer("supersedes_id"),
+});
+
 export const auditEvents = pgTable("audit_events", {
   id: serial("id").primaryKey(),
   actorId: integer("actor_id").notNull(),
@@ -254,6 +265,7 @@ export const notifications = pgTable("notifications", {
   message: text("message").notNull(),
   entityType: varchar("entity_type", { length: 48 }),
   entityId: integer("entity_id"),
+  dedupeKey: varchar("dedupe_key", { length: 255 }).unique(),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("notifications_user_created_idx").on(table.userId, table.createdAt)]);

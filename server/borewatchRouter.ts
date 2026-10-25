@@ -19,6 +19,7 @@ import {
   responsibleParties,
   notifications,
   hazardLayers,
+  decisionRecords,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { permissionProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -41,9 +42,10 @@ async function audit(actorId: number, action: string, resourceType: string, reso
   const db = await dbOrThrow();
   await db.insert(auditEvents).values({ actorId, action, resourceType, resourceId, detailJson: JSON.stringify(detail) });
 }
-async function notifyUser(userId: number, type: string, title: string, message: string, entityType?: string, entityId?: number) {
+async function notifyUser(userId: number, type: string, title: string, message: string, entityType?: string, entityId?: number, dedupeKey?: string) {
   const db = await dbOrThrow();
-  await db.insert(notifications).values({ userId, type, title, message, entityType, entityId });
+  const query = db.insert(notifications).values({ userId, type, title, message, entityType, entityId, dedupeKey });
+  if (dedupeKey) await query.onConflictDoNothing({ target: notifications.dedupeKey }); else await query;
 }
 async function notifyPermissionHolders(permission: string, type: string, title: string, message: string, entityType?: string, entityId?: number) {
   const db = await dbOrThrow();
@@ -282,6 +284,7 @@ export const borewatchRouter = router({
         }
         if (input.toStage === "decision_recorded" && !input.decisionOutcome) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose an outcome for the human decision" });
         await db.update(applications).set({ stage: input.toStage, decisionOutcome: input.toStage === "decision_recorded" ? input.decisionOutcome : application.decisionOutcome, decisionConditions: input.toStage === "decision_recorded" ? input.decisionConditions : application.decisionConditions, updatedBy: ctx.user!.id, submittedAt: input.toStage === "submitted" ? new Date() : application.submittedAt }).where(eq(applications.id, application.id));
+        if (input.toStage === "decision_recorded") await db.insert(decisionRecords).values({ applicationId: application.id, outcome: input.decisionOutcome!, reason: input.reason!, conditions: input.decisionConditions ?? null, decidedBy: ctx.user!.id });
         await db.insert(workflowEvents).values({ applicationId: application.id, fromStage: application.stage, toStage: input.toStage, actorId: ctx.user!.id, reason: input.reason });
         await audit(ctx.user!.id, "application.transitioned", "application", application.reference, input);
         if (ctx.user!.id !== application.applicantId) {
@@ -298,6 +301,26 @@ export const borewatchRouter = router({
       const permissions = await getUserPermissions(ctx.user!);
       if (application.applicantId !== ctx.user!.id && !permissions.has("*") && !permissions.has("application:review")) throw new TRPCError({ code: "FORBIDDEN", message: "You cannot view this application history" });
       return db.select().from(workflowEvents).where(eq(workflowEvents.applicationId, input.applicationId)).orderBy(desc(workflowEvents.createdAt));
+    }),
+    decisions: protectedProcedure.input(z.object({ applicationId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const [application] = await db.select().from(applications).where(eq(applications.id, input.applicationId)).limit(1);
+      if (!application) throw new TRPCError({ code: "NOT_FOUND", message: "Application not found" });
+      const permissions = await getUserPermissions(ctx.user!);
+      if (application.applicantId !== ctx.user!.id && !permissions.has("*") && !permissions.has("application:review")) throw new TRPCError({ code: "FORBIDDEN", message: "You cannot view decision history" });
+      return db.select().from(decisionRecords).where(eq(decisionRecords.applicationId, input.applicationId)).orderBy(desc(decisionRecords.decidedAt));
+    }),
+    correctDecision: permissionProcedure("decision:record").input(z.object({ applicationId: z.number().int().positive(), outcome: z.enum(["approved", "rejected", "withdrawn"]), reason: z.string().trim().min(1).max(2000), conditions: z.string().trim().max(4000).optional() })).mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const [application] = await db.select().from(applications).where(eq(applications.id, input.applicationId)).limit(1);
+      if (!application) throw new TRPCError({ code: "NOT_FOUND", message: "Application not found" });
+      if (application.stage !== "decision_recorded") throw new TRPCError({ code: "CONFLICT", message: "Only a recorded decision can be corrected" });
+      const previous = await db.select().from(decisionRecords).where(eq(decisionRecords.applicationId, application.id)).orderBy(desc(decisionRecords.decidedAt)).limit(1);
+      const [decision] = await db.insert(decisionRecords).values({ applicationId: application.id, outcome: input.outcome, reason: input.reason, conditions: input.conditions ?? null, decidedBy: ctx.user!.id, supersedesId: previous[0]?.id ?? null }).returning();
+      await db.update(applications).set({ decisionOutcome: input.outcome, decisionConditions: input.conditions ?? null, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(applications.id, application.id));
+      await audit(ctx.user!.id, "application.decision_corrected", "application", application.reference, { supersedesId: previous[0]?.id ?? null, outcome: input.outcome, reason: input.reason });
+      await notifyUser(application.applicantId, "application", "Application decision corrected", `${application.reference} has a corrected decision. Reason: ${input.reason}`, "application", application.id);
+      return decision;
     }),
   }),
   inspections: router({
@@ -366,8 +389,10 @@ export const borewatchRouter = router({
     list: permissionProcedure("inspection:view_assigned").query(async ({ ctx }) => {
       const db = await dbOrThrow();
       const permissions = await getUserPermissions(ctx.user!);
-      if (permissions.has("*") || permissions.has("inspection:assign")) return db.select().from(followUpActions).orderBy(desc(followUpActions.createdAt));
-      return db.select().from(followUpActions).where(eq(followUpActions.ownerId, ctx.user!.id)).orderBy(desc(followUpActions.createdAt));
+      const actions = permissions.has("*") || permissions.has("inspection:assign") ? await db.select().from(followUpActions).orderBy(desc(followUpActions.createdAt)) : await db.select().from(followUpActions).where(eq(followUpActions.ownerId, ctx.user!.id)).orderBy(desc(followUpActions.createdAt));
+      const now = Date.now();
+      for (const action of actions) if (action.dueAt && action.dueAt.getTime() < now && action.status !== "completed" && action.status !== "cancelled") await notifyUser(action.ownerId, "overdue", "Follow-up action overdue", `${action.title} passed its due date (${action.dueAt.toLocaleDateString()}).`, "follow_up", action.id, `overdue:follow_up:${action.id}:${action.ownerId}`);
+      return actions;
     }),
     create: permissionProcedure("inspection:assign").input(z.object({ inspectionId: z.number().int().positive(), title: z.string().trim().min(1).max(255), ownerId: z.number().int().positive(), dueAt: z.string().datetime().optional() })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
