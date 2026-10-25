@@ -57,6 +57,13 @@
       "when": 1792943759335,
       "tag": "0007_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792943868604,
+      "tag": "0008_hazard_layers",
+      "breakpoints": true
     }
   ]
 }

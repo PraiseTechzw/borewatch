@@ -18,6 +18,7 @@ import {
   screeningResults,
   responsibleParties,
   notifications,
+  hazardLayers,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { permissionProcedure, adminProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -53,6 +54,74 @@ async function getSettings() {
   const [settings] = await db.select().from(workspaceSettings).where(eq(workspaceSettings.id, 1)).limit(1);
   if (!settings) throw new Error("Workspace configuration has not been initialized");
   return settings;
+}
+
+type GeoGeometry = { type: string; coordinates?: unknown; geometries?: GeoGeometry[] };
+type GeoFeature = { type: "Feature"; geometry: GeoGeometry | null };
+type GeoJsonInput = GeoGeometry | GeoFeature | { type: "FeatureCollection"; features: GeoFeature[] };
+function parseGeoJson(value: string): GeoJsonInput {
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Layer data must be valid GeoJSON" }); }
+  const validPosition = (position: unknown): position is number[] => Array.isArray(position) && position.length >= 2 && typeof position[0] === "number" && typeof position[1] === "number" && Number.isFinite(position[0]) && Number.isFinite(position[1]) && position[0] >= -180 && position[0] <= 180 && position[1] >= -90 && position[1] <= 90;
+  const validCoordinates = (coordinates: unknown): boolean => Array.isArray(coordinates) && (validPosition(coordinates) || coordinates.every(validCoordinates));
+  const validGeometry = (geometry: unknown): geometry is GeoGeometry => {
+    if (!geometry || typeof geometry !== "object") return false;
+    const item = geometry as GeoGeometry;
+    if (item.type === "GeometryCollection") return Array.isArray(item.geometries) && item.geometries.every(validGeometry);
+    return ["Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon"].includes(item.type) && validCoordinates(item.coordinates);
+  };
+  const item = parsed as { type?: string; geometry?: unknown; features?: unknown[] };
+  if (item?.type === "FeatureCollection" && Array.isArray(item.features) && item.features.every((feature) => (feature as GeoFeature)?.type === "Feature" && ((feature as GeoFeature).geometry === null || validGeometry((feature as GeoFeature).geometry)))) return parsed as GeoJsonInput;
+  if (item?.type === "Feature" && (item.geometry === null || validGeometry(item.geometry))) return parsed as GeoJsonInput;
+  if (validGeometry(parsed)) return parsed;
+  throw new TRPCError({ code: "BAD_REQUEST", message: "Layer must be a GeoJSON geometry, Feature or FeatureCollection with valid WGS84 coordinates" });
+}
+const radians = (degrees: number) => degrees * Math.PI / 180;
+function pointDistanceMeters(a: number[], b: number[]) {
+  const lat1 = radians(a[1]); const lat2 = radians(b[1]); const dLat = lat2 - lat1; const dLon = radians(b[0] - a[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 6371008.8 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+function pointSegmentDistanceMeters(point: number[], a: number[], b: number[]) {
+  const lat0 = radians(point[1]); const scaleX = 6371008.8 * Math.cos(lat0) * Math.PI / 180; const scaleY = 6371008.8 * Math.PI / 180;
+  const ax = (a[0] - point[0]) * scaleX; const ay = (a[1] - point[1]) * scaleY; const bx = (b[0] - point[0]) * scaleX; const by = (b[1] - point[1]) * scaleY;
+  const dx = bx - ax; const dy = by - ay; const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(ax + t * dx, ay + t * dy);
+}
+function pointInRing(point: number[], ring: number[][]) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]; const [xj, yj] = ring[j];
+    const crosses = (yi > point[1]) !== (yj > point[1]) && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi || Number.EPSILON) + xi;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+function distanceToGeometry(point: number[], geometry: GeoGeometry): number {
+  const c = geometry.coordinates as any;
+  const lines: number[][][] = []; let best = Number.POSITIVE_INFINITY;
+  const addLine = (line: number[][]) => { if (line.length === 1) best = Math.min(best, pointDistanceMeters(point, line[0])); else for (let i = 1; i < line.length; i++) best = Math.min(best, pointSegmentDistanceMeters(point, line[i - 1], line[i])); lines.push(line); };
+  switch (geometry.type) {
+    case "Point": return pointDistanceMeters(point, c);
+    case "MultiPoint": return Math.min(...(c as number[][]).map((p) => pointDistanceMeters(point, p)));
+    case "LineString": addLine(c); break;
+    case "MultiLineString": for (const line of c as number[][][]) addLine(line); break;
+    case "Polygon": {
+      const rings = c as number[][][];
+      if (rings.length && pointInRing(point, rings[0]) && !rings.slice(1).some((ring) => pointInRing(point, ring))) return 0;
+      for (const ring of rings) addLine(ring); break;
+    }
+    case "MultiPolygon": for (const poly of c as number[][][][]) { if (poly.length && pointInRing(point, poly[0]) && !poly.slice(1).some((ring) => pointInRing(point, ring))) return 0; for (const ring of poly) addLine(ring); } break;
+    case "GeometryCollection": return Math.min(...(geometry.geometries ?? []).map((item) => distanceToGeometry(point, item)));
+    default: return Number.POSITIVE_INFINITY;
+  }
+  return best;
+}
+function geoJsonDistanceMeters(point: number[], value: unknown): number {
+  const data = value as any;
+  if (data?.type === "FeatureCollection") return Math.min(...(data.features ?? []).filter((feature: any) => feature.geometry).map((feature: any) => distanceToGeometry(point, feature.geometry)));
+  if (data?.type === "Feature") return data.geometry ? distanceToGeometry(point, data.geometry) : Number.POSITIVE_INFINITY;
+  return distanceToGeometry(point, data);
 }
 
 async function assertEvidenceAccess(user: User, entityType: "borehole" | "application" | "inspection", entityId: number, write: boolean) {
@@ -110,8 +179,9 @@ export const borewatchRouter = router({
         db.select().from(dataSources).where(eq(dataSources.active, true)),
         db.select().from(screeningRules),
       ]);
+      const layers = await db.select().from(hazardLayers).orderBy(desc(hazardLayers.updatedAt));
       const permissions = await getUserPermissions(ctx.user!);
-      return { settings: { ...settings, workflow: JSON.parse(settings.workflowJson) }, roles, sources, rules, permissions: [...permissions] };
+      return { settings: { ...settings, workflow: JSON.parse(settings.workflowJson) }, roles, sources, rules, layers: layers.map(({ geometryJson, ...layer }) => ({ ...layer, geometryJson: permissions.has("*") || permissions.has("layer:view") ? geometryJson : null })), permissions: [...permissions] };
     }),
   }),
   boreholes: router({
@@ -390,10 +460,42 @@ export const borewatchRouter = router({
       const db = await dbOrThrow();
       const [record] = await db.select().from(boreholeRecords).where(eq(boreholeRecords.id, input.boreholeId)).limit(1);
       if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Borehole record not found" });
-      const [result] = await db.insert(screeningResults).values({ boreholeId: record.id, outcome: "unable_to_assess", explanation: "No verified spatial dataset and authority-approved screening rule are currently configured for this workspace. This result does not indicate that a hazard is absent.", assessedBy: ctx.user!.id }).returning();
-      await db.update(boreholeRecords).set({ screeningStatus: "unable_to_assess", updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(boreholeRecords.id, record.id));
-      await audit(ctx.user!.id, "screening.unable_to_assess", "borehole", record.recordCode, { resultId: result.id, reason: result.explanation });
-      return result;
+      const [rules, layers, sources] = await Promise.all([db.select().from(screeningRules).where(eq(screeningRules.active, true)), db.select().from(hazardLayers).where(eq(hazardLayers.active, true)), db.select().from(dataSources).where(eq(dataSources.active, true))]);
+      const layerByKey = new Map(layers.map((layer) => [layer.layerKey, layer])); const sourceByKey = new Map(sources.map((source) => [source.sourceKey, source]));
+      const point = [Number(record.longitude), Number(record.latitude)]; const assessedAt = new Date();
+      const results: Array<typeof screeningResults.$inferSelect> = [];
+      const verificationStatus = (source: typeof sources[number] | undefined) => { if (!source || !source.accessStatus.toLowerCase().includes("verified")) return false; try { const metadata = JSON.parse(source.metadataJson ?? "{}") as { verificationStatus?: string }; return ["verified", "approved"].includes(metadata.verificationStatus?.toLowerCase() ?? ""); } catch { return false; } };
+      for (const rule of rules.filter((item) => !item.effectiveAt || item.effectiveAt <= assessedAt)) {
+        let condition: { type?: string; layerKey?: string; thresholdMeters?: number; maxDatasetAgeDays?: number } = {};
+        try { condition = JSON.parse(rule.conditionJson) as typeof condition; } catch { /* malformed rules are recorded as unassessable below */ }
+        const layer = condition.layerKey ? layerByKey.get(condition.layerKey) : undefined;
+        const source = sourceByKey.get(rule.sourceKey);
+        const layerSource = layer ? sourceByKey.get(layer.sourceKey) : undefined;
+        const daysOld = layer?.datasetDate ? (assessedAt.getTime() - layer.datasetDate.getTime()) / 86400000 : Infinity;
+        const stale = condition.maxDatasetAgeDays !== undefined && daysOld > condition.maxDatasetAgeDays;
+        let outcome: string = "unable_to_assess"; let measuredValue: string | null = null; let thresholdValue: string | null = null; let explanation = "A required verified layer, source or supported rule configuration is unavailable. No hazard absence is inferred.";
+        if (condition.type === "distance" && layer && layer.verificationStatus === "verified" && verificationStatus(source) && verificationStatus(layerSource) && !stale && layer.coordinateReferenceSystem === "EPSG:4326" && typeof condition.thresholdMeters === "number" && condition.thresholdMeters >= 0) {
+          let geometry: unknown;
+          try { geometry = parseGeoJson(layer.geometryJson); } catch { geometry = null; }
+          const distance = geometry ? geoJsonDistanceMeters(point, geometry) : Number.POSITIVE_INFINITY;
+          if (Number.isFinite(distance)) {
+            measuredValue = `${distance.toFixed(1)} m`; thresholdValue = `${condition.thresholdMeters} m`;
+            outcome = distance <= condition.thresholdMeters ? "flagged_for_review" : "no_configured_rule_triggered";
+            explanation = distance <= condition.thresholdMeters ? `${rule.explanation} Measured distance ${distance.toFixed(1)} m is within the configured ${condition.thresholdMeters} m threshold. This is a preliminary flag for human review, not proof of contamination or non-compliance.` : `${rule.explanation} Measured distance ${distance.toFixed(1)} m is outside the configured ${condition.thresholdMeters} m threshold. This does not establish that the site is safe or free of hazards.`;
+          }
+        } else if (stale) explanation = `Layer data is older than the configured ${condition.maxDatasetAgeDays} day limit. Unable to assess; no hazard absence is inferred.`;
+        const [result] = await db.insert(screeningResults).values({ boreholeId: record.id, ruleKey: rule.ruleKey, ruleVersion: rule.version, sourceKey: layer?.sourceKey ?? rule.sourceKey, sourceVersion: layer?.version ?? null, outcome, explanation, measuredValue, thresholdValue, assessedAt, assessedBy: ctx.user!.id }).returning();
+        results.push(result);
+      }
+      if (results.length === 0) {
+        const [result] = await db.insert(screeningResults).values({ boreholeId: record.id, outcome: "unable_to_assess", explanation: "No active, verified spatial layer and approved screening rule are currently configured for this workspace. This result does not indicate that a hazard is absent.", assessedBy: ctx.user!.id, assessedAt }).returning();
+        results.push(result);
+      }
+      const overall = results.some((item) => item.outcome === "flagged_for_review") ? "flagged_for_review" : results.every((item) => item.outcome === "no_configured_rule_triggered") ? "no_configured_rule_triggered" : "unable_to_assess";
+      await db.update(boreholeRecords).set({ screeningStatus: overall, updatedBy: ctx.user!.id, updatedAt: assessedAt }).where(eq(boreholeRecords.id, record.id));
+      await audit(ctx.user!.id, "screening.assessed", "borehole", record.recordCode, { resultIds: results.map((item) => item.id), outcome: overall });
+      if (overall === "flagged_for_review") await notifyPermissionHolders("screening:review", "screening", "Potential spatial conflict flagged", `${record.recordCode} matched a configured preliminary screening rule and requires human review.`, "borehole", record.id);
+      return results;
     }),
     history: protectedProcedure.input(z.object({ boreholeId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const permissions = await getUserPermissions(ctx.user!);
@@ -527,8 +629,24 @@ export const borewatchRouter = router({
       await audit(ctx.user!.id, "data_source.updated", "data_source", input.sourceKey, { before, after: updated });
       return updated;
     }),
+    saveHazardLayer: permissionProcedure("layer:configure").input(z.object({ layerKey: z.string().trim().min(1).max(96), name: z.string().trim().min(1).max(255), sourceKey: z.string().trim().min(1).max(96), version: z.string().trim().min(1).max(96), geometryJson: z.string().min(2).max(8_000_000), datasetDate: z.string().datetime().nullable(), coordinateReferenceSystem: z.literal("EPSG:4326"), coverageJson: z.string().max(12000).nullable(), accuracyNotes: z.string().max(2000).nullable(), licenseNotes: z.string().max(2000).nullable(), verificationStatus: z.enum(["unverified", "verified", "stale", "demonstration"]), active: z.boolean() })).mutation(async ({ ctx, input }) => {
+      parseGeoJson(input.geometryJson);
+      const db = await dbOrThrow();
+      const [source] = await db.select().from(dataSources).where(eq(dataSources.sourceKey, input.sourceKey)).limit(1);
+      if (!source) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose an existing source for this layer" });
+      if (input.active && (input.verificationStatus !== "verified" || !source.accessStatus.toLowerCase().includes("verified"))) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a verified layer from a verified source can be activated" });
+      if (input.coverageJson) { try { JSON.parse(input.coverageJson); } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Coverage metadata must be valid JSON" }); } }
+      const [existing] = await db.select().from(hazardLayers).where(eq(hazardLayers.layerKey, input.layerKey)).limit(1);
+      if (existing && existing.version !== input.version) throw new TRPCError({ code: "CONFLICT", message: "Layer versions are retained immutably; use a new layer key for a new version" });
+      const values = { ...input, datasetDate: input.datasetDate ? new Date(input.datasetDate) : null, updatedBy: ctx.user!.id, updatedAt: new Date() };
+      const [saved] = existing ? await db.update(hazardLayers).set(values).where(eq(hazardLayers.id, existing.id)).returning() : await db.insert(hazardLayers).values(values).returning();
+      await audit(ctx.user!.id, "hazard_layer.saved", "hazard_layer", input.layerKey, { version: input.version, sourceKey: input.sourceKey, verificationStatus: input.verificationStatus, active: input.active });
+      return saved;
+    }),
     saveScreeningRule: permissionProcedure("layer:configure").input(z.object({ ruleKey: z.string().trim().min(1).max(96), name: z.string().trim().min(1).max(255), version: z.string().trim().min(1).max(64), jurisdiction: z.string().trim().min(1).max(160), hazardType: z.string().trim().min(1).max(96), conditionJson: z.string().min(2).max(12000), sourceKey: z.string().trim().min(1).max(96), sourceReference: z.string().trim().max(2000).nullable(), effectiveAt: z.string().datetime().nullable(), approvedBy: z.string().trim().max(255).nullable(), explanation: z.string().trim().min(1).max(2000), active: z.boolean() })).mutation(async ({ ctx, input }) => {
-      try { JSON.parse(input.conditionJson); } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Rule condition must be valid JSON" }); }
+      let condition: { type?: string; layerKey?: string; thresholdMeters?: number; maxDatasetAgeDays?: number };
+      try { condition = JSON.parse(input.conditionJson) as typeof condition; } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Rule condition must be valid JSON" }); }
+      if (condition.type !== "distance" || !condition.layerKey || typeof condition.thresholdMeters !== "number" || condition.thresholdMeters < 0 || condition.maxDatasetAgeDays !== undefined && condition.maxDatasetAgeDays <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "A screening distance rule needs type distance, a layer key and a non-negative threshold in metres" });
       if (input.active && (!input.approvedBy || !input.effectiveAt || !input.sourceReference)) throw new TRPCError({ code: "BAD_REQUEST", message: "An active rule requires an approver, effective date and authoritative source reference" });
       const db = await dbOrThrow();
       const [source] = await db.select().from(dataSources).where(eq(dataSources.sourceKey, input.sourceKey)).limit(1);
@@ -537,6 +655,8 @@ export const borewatchRouter = router({
         let sourceMetadata: { verificationStatus?: string } = {};
         try { sourceMetadata = JSON.parse(source.metadataJson ?? "{}") as typeof sourceMetadata; } catch { /* invalid source metadata cannot qualify as verified */ }
         if (!source.accessStatus.toLowerCase().includes("verified") || !["verified", "approved"].includes(sourceMetadata.verificationStatus?.toLowerCase() ?? "")) throw new TRPCError({ code: "BAD_REQUEST", message: "This rule cannot be activated until its source metadata is explicitly marked verified" });
+        const [layer] = await db.select().from(hazardLayers).where(eq(hazardLayers.layerKey, condition.layerKey)).limit(1);
+        if (!layer || !layer.active || layer.verificationStatus !== "verified" || layer.sourceKey !== input.sourceKey) throw new TRPCError({ code: "BAD_REQUEST", message: "Activate the verified spatial layer from the same source before activating this rule" });
       }
       const [existingRule] = await db.select({ id: screeningRules.id }).from(screeningRules).where(and(eq(screeningRules.ruleKey, input.ruleKey), eq(screeningRules.version, input.version))).limit(1);
       if (existingRule) throw new TRPCError({ code: "CONFLICT", message: "Rule versions are immutable; save changes as a new version" });

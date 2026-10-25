@@ -180,6 +180,24 @@ export const followUpActions = pgTable("follow_up_actions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const hazardLayers = pgTable("hazard_layers", {
+  id: serial("id").primaryKey(),
+  layerKey: varchar("layer_key", { length: 96 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  sourceKey: varchar("source_key", { length: 96 }).notNull(),
+  version: varchar("version", { length: 96 }).notNull(),
+  geometryJson: text("geometry_json").notNull(),
+  datasetDate: timestamp("dataset_date", { withTimezone: true }),
+  coordinateReferenceSystem: varchar("coordinate_reference_system", { length: 64 }).notNull(),
+  coverageJson: text("coverage_json"),
+  accuracyNotes: text("accuracy_notes"),
+  licenseNotes: text("license_notes"),
+  verificationStatus: varchar("verification_status", { length: 64 }).notNull(),
+  active: boolean("active").default(false).notNull(),
+  updatedBy: integer("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const screeningRules = pgTable("screening_rules", {
   id: serial("id").primaryKey(),
   ruleKey: varchar("rule_key", { length: 96 }).notNull(),
