@@ -92,6 +92,20 @@ async function assertEvidenceAccess(user: User, entityType: "borehole" | "applic
 
 export const borewatchRouter = router({
   geospatial: router({
+    boreholeInventory: permissionProcedure("record:view_all").query(async () => {
+      const sourceName = "borehole_database-1758978934.geojson";
+      let parsed: { type?: string; features?: Array<{ geometry?: { type?: string; coordinates?: unknown[] }; properties?: Record<string, unknown> }> };
+      try { parsed = JSON.parse(await readFile(join(process.cwd(), "data/geospatial", sourceName), "utf8")); }
+      catch { throw new TRPCError({ code: "NOT_FOUND", message: "The supplied borehole GeoJSON is missing from data/geospatial" }); }
+      if (parsed.type !== "FeatureCollection" || !Array.isArray(parsed.features)) throw new TRPCError({ code: "BAD_REQUEST", message: "The supplied borehole GeoJSON is invalid" });
+      return parsed.features.flatMap((feature) => {
+        const properties = feature.properties ?? {}; const coordinates = feature.geometry?.coordinates ?? [];
+        const recordCode = String(properties.natl_bhid ?? properties.national_bhid ?? properties.sadc_bhid ?? "").trim();
+        const longitude = Number(properties.long_wgs84 ?? coordinates[0]); const latitude = Number(properties.lat_wgs84 ?? coordinates[1]);
+        if (feature.geometry?.type !== "Point" || String(properties.country ?? "").toLowerCase() !== "zimbabwe" || !recordCode || !Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < 25 || longitude > 33.1 || latitude < -22.5 || latitude > -15.5) return [];
+        return [{ recordCode, longitude, latitude, datum: String(properties.geod_datum ?? "UNKNOWN"), boreholeType: properties.bh_type ?? null, depthM: properties.bh_depth_m ?? null, yieldLps: properties.yield_l_s ?? null, aquifer: properties.hgm_aqtype ?? null, lithology: properties.hgm_litho ?? null, waterLevelM: properties.swl_m ?? null, conductivityMsM: properties.ec_ms_m ?? null, nitrateMgL: properties.no3_mg_l ?? null, fluorideMgL: properties.f_mg_l ?? null }];
+      });
+    }),
     catchments: protectedProcedure.query(async () => {
       const path = join(process.cwd(), "data/geospatial/catchments-1761164005/catchments-1761164004.geojson");
       try {

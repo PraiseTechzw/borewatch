@@ -11,4 +11,15 @@
 
 ## Borehole inventory imports
 
-The GIS screen accepts a GeoJSON FeatureCollection of Zimbabwe `Point` features with `country: "Zimbabwe"`, a national borehole ID (`natl_bhid`, `national_bhid`, or `sadc_bhid`), and WGS84 longitude/latitude properties (`long_wgs84`, `lat_wgs84`) or Point coordinates. The import flow previews valid and excluded counts before saving. It is restricted to users with record creation and all-record access. Imported rows retain the original feature properties in the protected database, are marked unverified, and are deduplicated by national borehole ID. The source file's datum is recorded as unknown; these imports do not create a screening clearance.
+`borehole_database-1758978934.geojson` is the supplied national inventory (17,232 point features). It has 9,436 non-missing static water-level values and 9,740 yields from historical completion years 1938–2002. Its EC, TDS, fluoride and nitrate fields contain no measurements, and `geod_datum` is unknown. GIS has a direct **Import supplied borehole data** action, restricted to users with record creation and all-record access. Imports are batched, audited and deduplicated by national borehole ID. Records remain unverified until coordinate datum and provenance are checked; they cannot create a screening clearance. The same screen also accepts other GeoJSON FeatureCollections for review and import.
+
+## Catchment reference data
+
+`catchments-1761164005/catchments-1761164004.geojson` is available in GIS as a protected, toggleable reference overlay with seven catchment polygons. The [Zimbabwe Geoportal Main Catchments record](https://stagging.zimgeoportal.org.zw/datasets/main-catchments/) lists PDDL 1.0 and provides the GeoJSON download behind login. The GeoJSON declares CRS84, while its associated QGIS metadata reports EPSG:32735; confirm that discrepancy before measurement. It is excluded from screening rules and decisions.
+
+
+## Additional data links
+
+- Regional groundwater maps and borehole information: [SADC-GIP](https://sadc-gip.quartex.co.za/). Selected groundwater chemistry may be available by layer; coverage varies.
+- Surface-water dam levels and catchment summaries: [ZINWA Dam Levels](https://zinwa.co.zw/dam-levels/). This is an external, changing dashboard and not a groundwater-quality feed.
+- Current source metadata and local file availability are maintained in the BoreWatch Data sources page.
