@@ -64,6 +64,20 @@
       "when": 1792943868604,
       "tag": "0008_hazard_layers",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792944221795,
+      "tag": "0009_notification_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792944820454,
+      "tag": "0010_application_site_details",
+      "breakpoints": true
     }
   ]
 }

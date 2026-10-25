@@ -789,6 +789,8 @@
 @media(max-width:980px){.gis-layout{grid-template-columns:1fr}.admin-tools{grid-template-columns:1fr}.admin-tools>.panel:first-child{grid-column:auto}}
 @media(max-width:700px){.queue-grid{grid-template-columns:1fr}.inline-form{align-items:stretch}.inline-form label{min-width:100%}.followup-row{grid-template-columns:minmax(0,1fr) auto;gap:8px}.followup-row select{grid-column:2}.application-heading{flex-direction:column}.admin-tools{gap:9px}.map-legend{display:grid}.report-controls label{min-width:calc(50% - 8px)}}
 .notification-shortcut { position: relative; }
+.data-pill-offline { color: #8a4e2e; background: #fbefe7; }
+.data-pill-offline > span { background: #b65f36; }
 .notification-dot { position: absolute; right: 5px; top: 5px; width: 7px; height: 7px; border: 1px solid white; border-radius: 50%; background: #b65f36; }
 .notification-list { padding: 0 18px; }
 .notification-row { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid #e5e9e2; }
@@ -798,4 +800,9 @@
 .notification-copy { flex: 1; min-width: 0; }
 .notification-copy p { margin: 4px 0; color: #55625a; }
 .notification-copy small { color: #6f7c73; }
+.hazard-layer path { fill: rgba(194, 112, 61, .16); stroke: #b65f36; stroke-width: 2.3; vector-effect: non-scaling-stroke; }
+.hazard-layer circle { fill: #b65f36; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.legend-hazard { display: inline-block; width: 11px; height: 11px; border: 2px solid #b65f36; background: #f4d8c5; margin-right: 5px; vertical-align: -1px; }
+.offline-draft-note { display: block; padding: 9px 11px; border-radius: 7px; background: #edf3ec; color: #526158; }
+.report-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
 @media (max-width: 700px) { .notification-row { align-items: flex-start; flex-wrap: wrap; } .notification-row .notification-copy { flex-basis: calc(100% - 52px); } }

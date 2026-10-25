@@ -1,0 +1,1 @@
+ALTER TABLE "applications" ADD COLUMN "site_details_json" text;

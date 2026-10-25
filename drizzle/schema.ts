@@ -1,6 +1,7 @@
 import {
   boolean,
   integer,
+  index,
   pgEnum,
   pgTable,
   serial,
@@ -103,6 +104,7 @@ export const applications = pgTable("applications", {
   applicationType: varchar("application_type", { length: 96 }).default("borehole_registration").notNull(),
   decisionOutcome: varchar("decision_outcome", { length: 48 }),
   decisionConditions: text("decision_conditions"),
+  siteDetailsJson: text("site_details_json"),
   localAuthorityValue: varchar("local_authority_value", { length: 255 }),
   completenessJson: text("completeness_json"),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
@@ -254,7 +256,7 @@ export const notifications = pgTable("notifications", {
   entityId: integer("entity_id"),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => [index("notifications_user_created_idx").on(table.userId, table.createdAt)]);
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;

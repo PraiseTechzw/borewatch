@@ -21,3 +21,6 @@ const trpcClient = trpc.createClient({ links: [httpBatchLink({
   },
 })] });
 createRoot(document.getElementById("root")!).render(<trpc.Provider client={trpcClient} queryClient={queryClient}><QueryClientProvider client={queryClient}><App /></QueryClientProvider></trpc.Provider>);
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => { void navigator.serviceWorker.register("/sw.js").catch((error) => console.warn("BoreWatch offline shell could not be registered", error)); });
+}

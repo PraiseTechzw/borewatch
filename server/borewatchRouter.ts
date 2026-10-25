@@ -21,8 +21,9 @@ import {
   hazardLayers,
 } from "../drizzle/schema";
 import { getDb } from "./db";
-import { permissionProcedure, adminProcedure, protectedProcedure, router } from "./_core/trpc";
+import { permissionProcedure, protectedProcedure, router } from "./_core/trpc";
 import { getUserPermissions } from "./permissions";
+import { geoJsonDistanceMeters, parseGeoJson } from "./screeningGeometry";
 import { deleteEvidence, getEvidenceUrl, uploadEvidence } from "./storage";
 import { TRPCError } from "@trpc/server";
 
@@ -30,6 +31,7 @@ const coordinate = (min: number, max: number) => z.string().refine((value) => {
   const number = Number(value);
   return Number.isFinite(number) && number >= min && number <= max;
 }, "Coordinate must be a valid decimal-degree value in range");
+const applicationSiteDetails = z.object({ siteName: z.string().trim().min(1).max(255), district: z.string().trim().min(1).max(160), purpose: z.string().trim().min(1).max(160), locationDescription: z.string().trim().max(1000).optional(), latitude: coordinate(-90, 90), longitude: coordinate(-180, 180), responsiblePartyName: z.string().trim().min(1).max(255), responsiblePartyOrganization: z.string().trim().max(255).optional(), contactEmail: z.string().trim().email().max(320).optional(), contactPhone: z.string().trim().max(64).optional() });
 const dbOrThrow = async () => {
   const db = await getDb();
   if (!db) throw new Error("Database is not available; configure DATABASE_URL before using the authenticated application");
@@ -54,74 +56,6 @@ async function getSettings() {
   const [settings] = await db.select().from(workspaceSettings).where(eq(workspaceSettings.id, 1)).limit(1);
   if (!settings) throw new Error("Workspace configuration has not been initialized");
   return settings;
-}
-
-type GeoGeometry = { type: string; coordinates?: unknown; geometries?: GeoGeometry[] };
-type GeoFeature = { type: "Feature"; geometry: GeoGeometry | null };
-type GeoJsonInput = GeoGeometry | GeoFeature | { type: "FeatureCollection"; features: GeoFeature[] };
-function parseGeoJson(value: string): GeoJsonInput {
-  let parsed: unknown;
-  try { parsed = JSON.parse(value); } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Layer data must be valid GeoJSON" }); }
-  const validPosition = (position: unknown): position is number[] => Array.isArray(position) && position.length >= 2 && typeof position[0] === "number" && typeof position[1] === "number" && Number.isFinite(position[0]) && Number.isFinite(position[1]) && position[0] >= -180 && position[0] <= 180 && position[1] >= -90 && position[1] <= 90;
-  const validCoordinates = (coordinates: unknown): boolean => Array.isArray(coordinates) && (validPosition(coordinates) || coordinates.every(validCoordinates));
-  const validGeometry = (geometry: unknown): geometry is GeoGeometry => {
-    if (!geometry || typeof geometry !== "object") return false;
-    const item = geometry as GeoGeometry;
-    if (item.type === "GeometryCollection") return Array.isArray(item.geometries) && item.geometries.every(validGeometry);
-    return ["Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon"].includes(item.type) && validCoordinates(item.coordinates);
-  };
-  const item = parsed as { type?: string; geometry?: unknown; features?: unknown[] };
-  if (item?.type === "FeatureCollection" && Array.isArray(item.features) && item.features.every((feature) => (feature as GeoFeature)?.type === "Feature" && ((feature as GeoFeature).geometry === null || validGeometry((feature as GeoFeature).geometry)))) return parsed as GeoJsonInput;
-  if (item?.type === "Feature" && (item.geometry === null || validGeometry(item.geometry))) return parsed as GeoJsonInput;
-  if (validGeometry(parsed)) return parsed;
-  throw new TRPCError({ code: "BAD_REQUEST", message: "Layer must be a GeoJSON geometry, Feature or FeatureCollection with valid WGS84 coordinates" });
-}
-const radians = (degrees: number) => degrees * Math.PI / 180;
-function pointDistanceMeters(a: number[], b: number[]) {
-  const lat1 = radians(a[1]); const lat2 = radians(b[1]); const dLat = lat2 - lat1; const dLon = radians(b[0] - a[0]);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return 6371008.8 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-function pointSegmentDistanceMeters(point: number[], a: number[], b: number[]) {
-  const lat0 = radians(point[1]); const scaleX = 6371008.8 * Math.cos(lat0) * Math.PI / 180; const scaleY = 6371008.8 * Math.PI / 180;
-  const ax = (a[0] - point[0]) * scaleX; const ay = (a[1] - point[1]) * scaleY; const bx = (b[0] - point[0]) * scaleX; const by = (b[1] - point[1]) * scaleY;
-  const dx = bx - ax; const dy = by - ay; const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
-  return Math.hypot(ax + t * dx, ay + t * dy);
-}
-function pointInRing(point: number[], ring: number[][]) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i]; const [xj, yj] = ring[j];
-    const crosses = (yi > point[1]) !== (yj > point[1]) && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi || Number.EPSILON) + xi;
-    if (crosses) inside = !inside;
-  }
-  return inside;
-}
-function distanceToGeometry(point: number[], geometry: GeoGeometry): number {
-  const c = geometry.coordinates as any;
-  const lines: number[][][] = []; let best = Number.POSITIVE_INFINITY;
-  const addLine = (line: number[][]) => { if (line.length === 1) best = Math.min(best, pointDistanceMeters(point, line[0])); else for (let i = 1; i < line.length; i++) best = Math.min(best, pointSegmentDistanceMeters(point, line[i - 1], line[i])); lines.push(line); };
-  switch (geometry.type) {
-    case "Point": return pointDistanceMeters(point, c);
-    case "MultiPoint": return Math.min(...(c as number[][]).map((p) => pointDistanceMeters(point, p)));
-    case "LineString": addLine(c); break;
-    case "MultiLineString": for (const line of c as number[][][]) addLine(line); break;
-    case "Polygon": {
-      const rings = c as number[][][];
-      if (rings.length && pointInRing(point, rings[0]) && !rings.slice(1).some((ring) => pointInRing(point, ring))) return 0;
-      for (const ring of rings) addLine(ring); break;
-    }
-    case "MultiPolygon": for (const poly of c as number[][][][]) { if (poly.length && pointInRing(point, poly[0]) && !poly.slice(1).some((ring) => pointInRing(point, ring))) return 0; for (const ring of poly) addLine(ring); } break;
-    case "GeometryCollection": return Math.min(...(geometry.geometries ?? []).map((item) => distanceToGeometry(point, item)));
-    default: return Number.POSITIVE_INFINITY;
-  }
-  return best;
-}
-function geoJsonDistanceMeters(point: number[], value: unknown): number {
-  const data = value as any;
-  if (data?.type === "FeatureCollection") return Math.min(...(data.features ?? []).filter((feature: any) => feature.geometry).map((feature: any) => distanceToGeometry(point, feature.geometry)));
-  if (data?.type === "Feature") return data.geometry ? distanceToGeometry(point, data.geometry) : Number.POSITIVE_INFINITY;
-  return distanceToGeometry(point, data);
 }
 
 async function assertEvidenceAccess(user: User, entityType: "borehole" | "application" | "inspection", entityId: number, write: boolean) {
@@ -292,7 +226,7 @@ export const borewatchRouter = router({
       return db.select().from(applications).where(eq(applications.applicantId, ctx.user!.id)).orderBy(desc(applications.updatedAt));
     }),
     create: permissionProcedure("application:create")
-      .input(z.object({ boreholeId: z.number().int().positive().optional(), applicationType: z.string().trim().min(1).max(96).default("borehole_registration"), localAuthorityValue: z.string().trim().max(255).optional(), completeness: z.record(z.string(), z.boolean()).optional() }))
+      .input(z.object({ boreholeId: z.number().int().positive().optional(), applicationType: z.string().trim().min(1).max(96).default("borehole_registration"), localAuthorityValue: z.string().trim().max(255).optional(), completeness: z.record(z.string(), z.boolean()).optional(), siteDetails: applicationSiteDetails.optional() }))
       .mutation(async ({ ctx, input }) => {
         const db = await dbOrThrow();
         if (input.boreholeId) {
@@ -302,18 +236,18 @@ export const borewatchRouter = router({
           if (record.createdBy !== ctx.user!.id && !permissions.has("*") && !permissions.has("application:review")) throw new TRPCError({ code: "FORBIDDEN", message: "You cannot link an application to this borehole record" });
         }
         const reference = `APP-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
-        await db.insert(applications).values({ reference, boreholeId: input.boreholeId, applicantId: ctx.user!.id, stage: "draft", applicationType: input.applicationType, localAuthorityValue: input.localAuthorityValue, completenessJson: JSON.stringify(input.completeness ?? {}), updatedBy: ctx.user!.id });
+        await db.insert(applications).values({ reference, boreholeId: input.boreholeId, applicantId: ctx.user!.id, stage: "draft", applicationType: input.applicationType, localAuthorityValue: input.localAuthorityValue, completenessJson: JSON.stringify(input.completeness ?? {}), siteDetailsJson: input.siteDetails ? JSON.stringify(input.siteDetails) : null, updatedBy: ctx.user!.id });
         const [application] = await db.select().from(applications).where(eq(applications.reference, reference)).limit(1);
-        await audit(ctx.user!.id, "application.created", "application", reference, input);
+        await audit(ctx.user!.id, "application.created", "application", reference, { applicationType: input.applicationType, boreholeId: input.boreholeId, localAuthorityValue: input.localAuthorityValue, siteDetailsProvided: Boolean(input.siteDetails), checklistKeys: Object.keys(input.completeness ?? {}) });
         return application;
       }),
-    updateDraft: protectedProcedure.input(z.object({ applicationId: z.number().int().positive(), applicationType: z.string().trim().min(1).max(96), completeness: z.record(z.string(), z.boolean()), localAuthorityValue: z.string().trim().max(255).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    updateDraft: protectedProcedure.input(z.object({ applicationId: z.number().int().positive(), applicationType: z.string().trim().min(1).max(96), completeness: z.record(z.string(), z.boolean()), localAuthorityValue: z.string().trim().max(255).nullable().optional(), siteDetails: applicationSiteDetails.optional() })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const [application] = await db.select().from(applications).where(eq(applications.id, input.applicationId)).limit(1);
       if (!application) throw new TRPCError({ code: "NOT_FOUND", message: "Application not found" });
       if (application.applicantId !== ctx.user!.id || application.stage !== "draft") throw new TRPCError({ code: "FORBIDDEN", message: "Only the applicant may update an application draft" });
-      const [updated] = await db.update(applications).set({ applicationType: input.applicationType, completenessJson: JSON.stringify(input.completeness), localAuthorityValue: input.localAuthorityValue, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(applications.id, application.id)).returning();
-      await audit(ctx.user!.id, "application.draft_updated", "application", application.reference, input);
+      const [updated] = await db.update(applications).set({ applicationType: input.applicationType, completenessJson: JSON.stringify(input.completeness), localAuthorityValue: input.localAuthorityValue, siteDetailsJson: input.siteDetails ? JSON.stringify(input.siteDetails) : application.siteDetailsJson, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(applications.id, application.id)).returning();
+      await audit(ctx.user!.id, "application.draft_updated", "application", application.reference, { applicationType: input.applicationType, localAuthorityValue: input.localAuthorityValue, siteDetailsProvided: Boolean(input.siteDetails), checklistKeys: Object.keys(input.completeness) });
       return updated;
     }),
     transition: protectedProcedure
@@ -332,6 +266,11 @@ export const borewatchRouter = router({
         if (input.toStage === "decision_recorded" && !permissions.has("*") && !permissions.has("decision:record")) throw new TRPCError({ code: "FORBIDDEN", message: "Only a user with decision-recording authority may record a decision" });
         if ((input.toStage === "decision_recorded" || input.toStage === "information_requested" || applicantSubmission && input.toStage === "under_review") && !input.reason?.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "A reason is required for this workflow transition" });
         if (input.toStage === "submitted" && application.stage === "draft") {
+          if (!application.boreholeId) {
+            let siteDetails: z.infer<typeof applicationSiteDetails> | null = null;
+            try { siteDetails = application.siteDetailsJson ? applicationSiteDetails.parse(JSON.parse(application.siteDetailsJson)) : null; } catch { siteDetails = null; }
+            if (!siteDetails) throw new TRPCError({ code: "BAD_REQUEST", message: "Complete the applicant, site, purpose and coordinate details before submitting this application" });
+          }
           let completeness: Record<string, boolean> = {};
           try { completeness = JSON.parse(application.completenessJson ?? "{}") as Record<string, boolean>; } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Application checklist is invalid; save the draft checklist again" }); }
           const required = ["site_plan", "land_authority", "technical_details", "supporting_documents"];
@@ -593,13 +532,13 @@ export const borewatchRouter = router({
     }),
   }),
   administration: router({
-    users: adminProcedure.query(async () => {
+    users: permissionProcedure("user:manage").query(async () => {
       const db = await dbOrThrow();
       const allUsers = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(users).orderBy(users.email);
       const assignments = await db.select({ userId: userWorkspaceRoles.userId, roleKey: workspaceRoles.roleKey, roleName: workspaceRoles.name }).from(userWorkspaceRoles).innerJoin(workspaceRoles, eq(workspaceRoles.id, userWorkspaceRoles.roleId));
       return allUsers.map((user) => ({ ...user, workspaceRoles: assignments.filter((assignment) => assignment.userId === user.id) }));
     }),
-    assignRole: adminProcedure.input(z.object({ userId: z.number().int().positive(), roleKey: z.string().trim().min(1).max(64) })).mutation(async ({ ctx, input }) => {
+    assignRole: permissionProcedure("user:manage").input(z.object({ userId: z.number().int().positive(), roleKey: z.string().trim().min(1).max(64) })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const [role] = await db.select().from(workspaceRoles).where(eq(workspaceRoles.roleKey, input.roleKey)).limit(1);
       if (!role) throw new Error("Workspace role not found");
@@ -610,7 +549,7 @@ export const borewatchRouter = router({
       await audit(ctx.user!.id, "role.assigned", "user", String(user.id), { roleKey: input.roleKey });
       return { success: true } as const;
     }),
-    removeRole: adminProcedure.input(z.object({ userId: z.number().int().positive(), roleKey: z.string().trim().min(1).max(64) })).mutation(async ({ ctx, input }) => {
+    removeRole: permissionProcedure("user:manage").input(z.object({ userId: z.number().int().positive(), roleKey: z.string().trim().min(1).max(64) })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const [user] = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
       const [role] = await db.select().from(workspaceRoles).where(eq(workspaceRoles.roleKey, input.roleKey)).limit(1);
@@ -630,17 +569,28 @@ export const borewatchRouter = router({
       return updated;
     }),
     saveHazardLayer: permissionProcedure("layer:configure").input(z.object({ layerKey: z.string().trim().min(1).max(96), name: z.string().trim().min(1).max(255), sourceKey: z.string().trim().min(1).max(96), version: z.string().trim().min(1).max(96), geometryJson: z.string().min(2).max(8_000_000), datasetDate: z.string().datetime().nullable(), coordinateReferenceSystem: z.literal("EPSG:4326"), coverageJson: z.string().max(12000).nullable(), accuracyNotes: z.string().max(2000).nullable(), licenseNotes: z.string().max(2000).nullable(), verificationStatus: z.enum(["unverified", "verified", "stale", "demonstration"]), active: z.boolean() })).mutation(async ({ ctx, input }) => {
-      parseGeoJson(input.geometryJson);
+      try { parseGeoJson(input.geometryJson); } catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Invalid GeoJSON layer" }); }
       const db = await dbOrThrow();
       const [source] = await db.select().from(dataSources).where(eq(dataSources.sourceKey, input.sourceKey)).limit(1);
       if (!source) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose an existing source for this layer" });
-      if (input.active && (input.verificationStatus !== "verified" || !source.accessStatus.toLowerCase().includes("verified"))) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a verified layer from a verified source can be activated" });
+      let sourceMetadata: { verificationStatus?: string } = {};
+      try { sourceMetadata = JSON.parse(source.metadataJson ?? "{}") as typeof sourceMetadata; } catch { /* Invalid metadata cannot qualify as verified */ }
+      const sourceVerified = source.accessStatus.toLowerCase().includes("verified") && ["verified", "approved"].includes(sourceMetadata.verificationStatus?.toLowerCase() ?? "");
+      if (input.active && (input.verificationStatus !== "verified" || !sourceVerified || !input.datasetDate || !input.accuracyNotes?.trim() || !input.licenseNotes?.trim())) throw new TRPCError({ code: "BAD_REQUEST", message: "An active layer requires a verified source, dataset date, accuracy notes and data-use terms" });
       if (input.coverageJson) { try { JSON.parse(input.coverageJson); } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Coverage metadata must be valid JSON" }); } }
       const [existing] = await db.select().from(hazardLayers).where(eq(hazardLayers.layerKey, input.layerKey)).limit(1);
-      if (existing && existing.version !== input.version) throw new TRPCError({ code: "CONFLICT", message: "Layer versions are retained immutably; use a new layer key for a new version" });
+      if (existing) throw new TRPCError({ code: "CONFLICT", message: "Layer records are immutable; use a new layer key for each version" });
       const values = { ...input, datasetDate: input.datasetDate ? new Date(input.datasetDate) : null, updatedBy: ctx.user!.id, updatedAt: new Date() };
-      const [saved] = existing ? await db.update(hazardLayers).set(values).where(eq(hazardLayers.id, existing.id)).returning() : await db.insert(hazardLayers).values(values).returning();
+      const [saved] = await db.insert(hazardLayers).values(values).returning();
       await audit(ctx.user!.id, "hazard_layer.saved", "hazard_layer", input.layerKey, { version: input.version, sourceKey: input.sourceKey, verificationStatus: input.verificationStatus, active: input.active });
+      return saved;
+    }),
+    deactivateHazardLayer: permissionProcedure("layer:configure").input(z.object({ layerKey: z.string().trim().min(1).max(96), reason: z.string().trim().min(1).max(2000) })).mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const [layer] = await db.select().from(hazardLayers).where(eq(hazardLayers.layerKey, input.layerKey)).limit(1);
+      if (!layer) throw new TRPCError({ code: "NOT_FOUND", message: "Hazard layer not found" });
+      const [saved] = await db.update(hazardLayers).set({ active: false, updatedBy: ctx.user!.id, updatedAt: new Date() }).where(eq(hazardLayers.id, layer.id)).returning();
+      await audit(ctx.user!.id, "hazard_layer.deactivated", "hazard_layer", input.layerKey, { reason: input.reason });
       return saved;
     }),
     saveScreeningRule: permissionProcedure("layer:configure").input(z.object({ ruleKey: z.string().trim().min(1).max(96), name: z.string().trim().min(1).max(255), version: z.string().trim().min(1).max(64), jurisdiction: z.string().trim().min(1).max(160), hazardType: z.string().trim().min(1).max(96), conditionJson: z.string().min(2).max(12000), sourceKey: z.string().trim().min(1).max(96), sourceReference: z.string().trim().max(2000).nullable(), effectiveAt: z.string().datetime().nullable(), approvedBy: z.string().trim().max(255).nullable(), explanation: z.string().trim().min(1).max(2000), active: z.boolean() })).mutation(async ({ ctx, input }) => {
